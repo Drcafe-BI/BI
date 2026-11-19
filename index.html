@@ -1207,5 +1207,17 @@ window.__sb.auth.getSession().then(function(r){
 window.__preLatest=function(q){return PRE.latest?PRE.latest.then(function(x){return x&&x.data?x:q()},q):q()};
 window.__preRecent=function(n){return PRE.recent?PRE.recent.then(function(x){return x&&x.n===n&&x.rows.length?x.rows:null},function(){return null}):Promise.resolve(null)};
 }();</script>
+<script>!function(){
+/* MENU MIX READY BEFORE IT IS OPENED: for people who have used Menu Mix in this browser before, it starts
+   loading out of sight 2 seconds after the dashboard is on screen (it signs in and loads its data), so the
+   Menu Mix button opens it straight away. People who never open Menu Mix do not download its data. */
+if(window.self!==window.top)return;var URL="https://viewx-yousuf.github.io/Menu-Mix/",KEY="viewx-mm-used",f=document.getElementById("menuMixFrame"),pill=document.getElementById("menuMixPill"),done=!1;if(!f)return;
+function used(){try{return localStorage.getItem(KEY)==="1"}catch(e){return!1}}
+pill&&pill.addEventListener("click",function(){try{localStorage.setItem(KEY,"1")}catch(e){}},!0);
+document.querySelectorAll(".menu-mix-btn").forEach(function(b){b.addEventListener("click",function(){try{localStorage.setItem(KEY,"1")}catch(e){}},!0)});
+function go(){if(done||!window.__loggedIn)return;done=!0;f.getAttribute("src")||(f.src=URL)}
+document.addEventListener("dashboard:filtered",function(){if(done||!window.__loggedIn||!(window.__rawData||[]).length||!used())return;
+  setTimeout(function(){window.requestIdleCallback?requestIdleCallback(go,{timeout:2000}):go()},2000)});
+}();</script>
 </body>
 </html>

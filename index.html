@@ -2475,5 +2475,264 @@ try{Object.assign(AR_TEXT,{"Secure sign-in · two-step verification for admins":
 }();
 </script>
 
+<!-- =====================================================================
+     ADD-ON v7.6 (new code only): Waste & Mix
+     Joins food wastage (item codes 1080… / 1089…) with Menu Mix item sales, store by store, over the
+     last 4 weeks of wastage data, and turns it into a short list of actions per store:
+       Make fewer   - on a weekday where at least N were wasted on every one of the last 4 such days
+       Make more    - on a weekday with zero waste every time, while other weekdays do have waste
+                      (the item probably sells out that day)
+       Review       - wasted 35%+ of what was made while selling 5 or fewer a day
+     "Made" is not recorded, so it is taken as sold + wasted. Items are linked with WASTE_MM_MAP
+     (wastage Item No. -> Menu Mix INVD_ITEM), made from "Waste to Menu Mix item map (draft).csv".
+     Item sales come from the Menu Mix page (needs the v7.6 Menu Mix: 'viewx-item-daily').
+     ===================================================================== -->
+<style>
+#wmKpis{grid-template-columns:repeat(4,minmax(0,1fr))}@media (max-width:720px){#wmKpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.wm-msg{padding:28px;text-align:center;color:var(--text-light);font-size:.86rem}
+.wm-msg.err{color:var(--danger)}
+.wm-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:16px;align-items:start}
+@media (max-width:1100px){.wm-grid{grid-template-columns:1fr}}
+#wmStores tr{cursor:pointer}#wmStores tr.sel td{background:var(--primary-light)}
+#wmStores td,#wmStores th{white-space:nowrap}
+.wm-act{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--border)}
+.wm-act:last-child{border-bottom:none}
+.wm-ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:.9rem}
+.wm-ic.cut{background:var(--danger-light);color:var(--danger)}.wm-ic.add{background:var(--success-light);color:var(--success)}.wm-ic.review{background:var(--warning-light);color:var(--warning)}
+.wm-t{font-size:.88rem;font-weight:600;color:var(--text-main)}.wm-d{font-size:.8rem;color:var(--text-muted);margin-top:2px;line-height:1.5}
+.wm-v{text-align:right;font-weight:700;font-size:.88rem;white-space:nowrap}.wm-v small{display:block;font-weight:500;font-size:.7rem;color:var(--text-light)}
+.wm-dw{display:flex;gap:3px;margin-top:7px;flex-wrap:wrap}
+.wm-dw i{font-style:normal;font-size:.68rem;font-weight:600;min-width:42px;text-align:center;padding:2px 4px;border-radius:5px;background:var(--bg);color:var(--text-light);border:1px solid var(--border)}
+.wm-dw i.cut{background:var(--danger-light);color:var(--danger);border-color:transparent}.wm-dw i.add{background:var(--success-light);color:var(--success);border-color:transparent}
+.wm-note{font-size:.78rem;color:var(--text-muted);line-height:1.6}
+.wm-flag{display:inline-block;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:6px;margin-left:6px;background:var(--danger-light);color:var(--danger);vertical-align:1px}
+</style>
+<script>!function(){
+"use strict";
+if(window.self!==window.top)return;
+if(typeof FilterState==="undefined"||typeof TAB_META==="undefined"||typeof switchTab!=="function")return;
+var WASTE_MM_MAP={"1080000036":"721002","1080000035":"721001","1080000025":"721010","1080000024":"721009","1080000090":"724074","1080000097":"724084","1080000091":"724073","1080000026":"721011","1080000053":"721024","1080000023":"723057","1080000088":"724076","1080000520":"721101","1080000074":"724066","1080000047":"721018","1080000021":"723056","1080000507":"721081","1080000054":"721025","1080000028":"721014","1080000056":"721026","1080000522":"723077","1080000078":"724085","1080000032":"721017","1080000013":"723052","1080000034":"721007","1080000087":"724088","1080000524":"724084","1080000050":"721022","1080000031":"721016","1080000004":"723055","1080000070":"724079","1080000079":"724082","1080000052":"721021","1080000011":"723054","1080000095":"724072","1080000513":"724106","1080000082":"724086","1080000512":"724107","1080000076":"724067","1080000137":"721038","1080000136":"721035","1080000006":"723059","1080000535":"721102","1080000033":"721008","1080000517":"724108","1080000040":"721006","1080000560":"723082","1080000170":"721060","1080000529":"721097","1080000523":"721092","1080000060":"722041","1080000093":"724077","1080000521":"723076","1080000007":"723053","1080000509":"721082","1080000561":"723083","1080000514":"721085","1080000246":"721079","1080000141":"732007","1080000525":"724109","1080000559":"723081","1080000139":"732009","1080000519":"721100","1080000080":"724081","1080000250":"721080","1080000562":"723084","1080000016":"723051","1080000140":"732008","1080000049":"721019","1080000118":"800145","1080000075":"724065","1080000135":"721037","1080000012":"723061","1080000010":"731001","1080000048":"721020","1080000044":"721033","1080000081":"724087","1080000133":"732006","1080000071":"724080","1080000038":"721004","1080000131":"721040","1080000206":"731008","1080000203":"731005","1080000510":"721083","1080000202":"731004","1080000544":"732026","1080000543":"732025","1080000111":"800169","1080000051":"721023","1080000253":"732012","1080000552":"723055","1080000003":"723058","1080000574":"800169","1080000534":"721092","1080000138":"721036","1080000112":"800168","1080000238":"732020","1080000234":"732016","1080000205":"731007","1080000233":"732016","1080000099":"722049","1080000235":"731005","1080000185":"733021","1080000241":"731007","1080000243":"721037","1080000037":"721003","1080000029":"721015","1080000195":"721023","1080000068":"724092"};
+var O="https://viewx-yousuf.github.io",URL="https://viewx-yousuf.github.io/Menu-Mix/";
+var DAYS=28,DOWS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],DOWL=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],PER_MONTH=30/DAYS;
+var pad=function(n){return String(n).padStart(2,"0")};
+var dayNum=function(y,m,d){return Math.round(Date.UTC(y,m-1,d)/864e5)};
+var isoOf=function(n){return new Date(n*864e5).toISOString().slice(0,10)};
+var numOf=function(s){return Math.round(Date.parse(s+"T00:00:00Z")/864e5)};
+var wdOf=function(n){return((n%7)+7+4)%7};
+var labelDay=function(n){var t=new Date(n*864e5);return pad(t.getUTCDate())+" "+MONTHS[t.getUTCMonth()]+" "+t.getUTCFullYear()};
+var code=function(v){var s=String(v==null?"":v).trim();if(/^\d+\.0+$/.test(s))s=s.replace(/\.0+$/,"");return s.replace(/^0+(?=\d)/,"")};
+var isFood=function(no){return/^108[09]/.test(code(no))};
+var n0=function(v){return Math.round(v||0).toLocaleString("en-US")};
+var esc=function(s){return typeof escapeHtml==="function"?escapeHtml(s==null?"":s):String(s==null?"":s)};
+var money=function(v){return typeof fmtCur==="function"?fmtCur(v):n0(v)};
+var pct=function(v,d){return v==null||!isFinite(v)?"—":(v*100).toFixed(d==null?1:d)+"%"};
+function scopePass(r){
+  var ns=function(k){return typeof narrowedSelection==="function"&&FilterState[k]&&FilterState[k].options.length?narrowedSelection(k):null};
+  var st=ns("store"),ar=ns("area"),sg=ns("segment"),fm=ns("format");
+  if(st&&!st.has(r.storeCode))return!1;if(ar&&!ar.has(r.area))return!1;
+  if(sg&&!sg.has(r.segment))return!1;if(fm&&!fm.has(r.format))return!1;
+  var q=typeof globalSearchTerm!=="undefined"?globalSearchTerm:"";
+  return!q||(r.store+" "+r.storeCode+" "+r.area).toLowerCase().includes(q);
+}
+function storeName(r){var s=String(r.store||"");return s.startsWith(String(r.storeCode))?s:r.storeCode+" - "+s}
+// "Sun–Wed", "Thu", "Sun, Tue"
+function dayGroups(wds){wds=wds.slice().sort();if(wds.length===7)return"every day";var out=[],i=0;
+  while(i<wds.length){var j=i;while(j+1<wds.length&&wds[j+1]===wds[j]+1)j++;out.push(j-i>=2?DOWS[wds[i]]+"–"+DOWS[wds[j]]:j>i?DOWS[wds[i]]+", "+DOWS[wds[j]]:DOWS[wds[i]]);i=j+1}
+  return out.join(", ")}
+
+/* ---------- Menu Mix bridge (same window the Menu Mix button opens) ---------- */
+var frame=null,seq=0,pending={};
+function ensureFrame(){frame=frame||document.getElementById("menuMixFrame");if(!frame)return!1;frame.getAttribute("src")||(frame.src=URL);return!0}
+window.addEventListener("message",function(e){
+  if(e.origin!==O||!frame||e.source!==frame.contentWindow||!e.data)return;var p=pending[e.data.id];if(!p)return;
+  e.data.type==="viewx-item-compare-ack"?p.ack():e.data.type==="viewx-item-daily-result"&&p.res(e.data)});
+function askDaily(req){return new Promise(function(res,rej){
+  if(!ensureFrame())return rej(Error("Menu Mix is not available on this page."));
+  var id="wm"+(++seq),acked=!1,t0=Date.now(),timer;
+  pending[id]={res:function(d){clearInterval(timer);delete pending[id];res(d)},ack:function(){acked=!0}};
+  var send=function(){try{frame.contentWindow&&frame.contentWindow.postMessage(Object.assign({type:"viewx-item-daily",id:id},req),O)}catch(e){}};
+  send();timer=setInterval(function(){
+    if(!pending[id])return clearInterval(timer);
+    var stop=function(m){clearInterval(timer);delete pending[id];rej(Error(m))};
+    if(!frame.getAttribute("src"))return stop("Menu Mix was closed. Open this tab again to reload.");
+    if(!acked){Date.now()-t0>45e3?stop("Menu Mix did not answer. It may need the v7.6 update, or you may need to sign in again."):send()}
+    else Date.now()-t0>24e4&&stop("Menu Mix took too long to load these weeks.")},1500)})}
+
+/* ---------- data ---------- */
+var MM=null,MMkey="",loading=null,R=null,sel=null,err="";
+function wasteWindow(){
+  var W=window.__wastageData||[],L=0;
+  W.forEach(function(w){if(isFood(w.itemNo)&&w.year){var n=dayNum(w.year,w.month,w.day);n>L&&(L=n)}});
+  return L?{from:L-DAYS+1,to:L}:null}
+function compute(win){
+  var raw=window.__rawData||[],W=window.__wastageData||[],from=win.from,to=win.to;
+  // stores in the current filters, with this window's sales
+  var S=new Map();
+  raw.forEach(function(r){if(!r.year||r.day==null)return;var n=dayNum(r.year,r.month,r.day),c=code(r.storeCode),s=S.get(c);
+    if(!s){if(!scopePass(r))return;S.set(c,s={code:c,rawCode:r.storeCode,name:storeName(r),area:r.area,format:r.format,segment:r.segment,sales:0,last:-1})}
+    if(n>=from&&n<=to){s.sales+=r.net||0;n>=s.last&&(s.last=n,s.area=r.area,s.name=storeName(r))}});
+  // menu mix: sold per store|item|day, trading days per store
+  var sold=new Map(),mmDays=new Map(),itemName=new Map(),gPrice=new Map();
+  (MM.rows||[]).forEach(function(x){var s=code(x[0]),n=numOf(x[2]);if(n<from||n>to)return;sold.set(s+"|"+x[1]+"|"+n,{q:+x[3]||0,v:+x[4]||0});
+    var g=gPrice.get(x[1])||{q:0,v:0};g.q+=+x[3]||0;g.v+=+x[4]||0;gPrice.set(x[1],g)});
+  Object.keys(MM.days||{}).forEach(function(s){mmDays.set(code(s),new Set(MM.days[s].map(numOf).filter(function(n){return n>=from&&n<=to})))});
+  // wastage: food only; linked items by store|mmItem|day
+  var waste=new Map(),food=new Map(),unl=new Map(),gCost=new Map();
+  W.forEach(function(w){if(!isFood(w.itemNo)||!w.year)return;var n=dayNum(w.year,w.month,w.day);if(n<from||n>to)return;
+    var s=code(w.storeCode);if(!S.has(s))return;
+    var f=food.get(s)||{cost:0,linked:0};f.cost+=w.wastageCost||0;
+    var mm=WASTE_MM_MAP[code(w.itemNo)];
+    if(!mm){var u=unl.get(w.itemName||w.itemNo)||0;unl.set(w.itemName||w.itemNo,u+(w.wastageCost||0));food.set(s,f);return}
+    f.linked+=w.wastageCost||0;food.set(s,f);itemName.has(mm)||itemName.set(mm,w.itemName||mm);
+    var k=s+"|"+mm+"|"+n,x=waste.get(k)||{q:0,c:0};x.q+=+w.qty||0;x.c+=w.wastageCost||0;waste.set(k,x);
+    var g=gCost.get(mm)||{q:0,c:0};g.q+=+w.qty||0;g.c+=w.wastageCost||0;gCost.set(mm,g)});
+  // every store|item pair that has waste in the window
+  var pairs=new Map();waste.forEach(function(v,k){var p=k.split("|");pairs.has(p[0]+"|"+p[1])||pairs.set(p[0]+"|"+p[1],{s:p[0],i:p[1]})});
+  // waste rate by item and format (for "vs similar stores")
+  var fmt=new Map();
+  var items=[];
+  pairs.forEach(function(p){
+    var st=S.get(p.s),days=mmDays.get(p.s);if(!st||!days||days.size<14)return;   // need Menu Mix days for this store
+    var dl=[...days].sort(function(a,b){return a-b}),T={sold:0,waste:0,cost:0,sales:0},byWd=[[],[],[],[],[],[],[]],half=from+DAYS/2,h1={s:0,m:0},h2={s:0,m:0};
+    dl.forEach(function(n){var so=sold.get(p.s+"|"+p.i+"|"+n)||{q:0,v:0},wa=waste.get(p.s+"|"+p.i+"|"+n)||{q:0,c:0};
+      T.sold+=so.q;T.sales+=so.v;T.waste+=wa.q;T.cost+=wa.c;byWd[wdOf(n)].push({n:n,s:so.q,w:wa.q});
+      var h=n<half?h1:h2;h.s+=so.q;h.m+=so.q+wa.q});
+    if(T.sold+T.waste<=0)return;
+    var gc=gCost.get(p.i),gp=gPrice.get(p.i);
+    var unitCost=T.waste>0&&T.cost>0?T.cost/T.waste:gc&&gc.q>0?gc.c/gc.q:0,unitPrice=T.sold>0?T.sales/T.sold:gp&&gp.q>0?gp.v/gp.q:0;
+    var it={store:st,item:p.i,name:itemName.get(p.i)||p.i,sold:T.sold,waste:T.waste,cost:T.cost,rate:T.waste/(T.sold+T.waste),
+      perDay:T.sold/dl.length,unitCost:unitCost,unitPrice:unitPrice,byWd:byWd,h1:h1,h2:h2,days:dl.length};
+    items.push(it);
+    var fk=(st.format||"")+"|"+p.i,f=fmt.get(fk)||{s:0,w:0,n:0};f.s+=T.sold;f.w+=T.waste;f.n++;fmt.set(fk,f)});
+  // actions
+  var A=[];
+  items.forEach(function(it){
+    var cut=[0,0,0,0,0,0,0],add=[0,0,0,0,0,0,0],cutWd=[],addWd=[];
+    var wastedSomeDay=it.byWd.some(function(d){return d.some(function(x){return x.w>0})});
+    it.byWd.forEach(function(d,wd){if(d.length<3)return;
+      var minW=Math.min.apply(null,d.map(function(x){return x.w})),allSold=d.every(function(x){return x.s>0}),avgS=d.reduce(function(a,x){return a+x.s},0)/d.length;
+      if(minW>=1){cut[wd]=Math.floor(minW);cutWd.push(wd)}
+      else if(wastedSomeDay&&allSold&&avgS>=4&&d.every(function(x){return x.w===0})){add[wd]=Math.max(1,Math.round(avgS*.1));addWd.push(wd)}});
+    var f=fmt.get((it.store.format||"")+"|"+it.item),fr=f&&f.n>=3&&f.s+f.w>0?f.w/(f.s+f.w):null;
+    var sim=fr!=null?" vs "+pct(fr,0)+" at similar "+(it.store.format?String(it.store.format).toLowerCase():"")+" stores":"";
+    var fell=it.h1.s>0&&it.h2.s/it.h1.s-1<=-.25&&it.h1.m>0&&it.h2.m/it.h1.m-1>-.1;
+    var fellTxt=fell?" Sales fell "+Math.round((1-it.h2.s/it.h1.s)*100)+"% in the last 2 weeks, but the amount made didn't.":"";
+    var base={store:it.store,item:it.item,name:it.name,rate:it.rate,sold:it.sold,waste:it.waste,cost:it.cost,fell:fell};
+    var review=it.rate>=.35&&it.perDay<=5&&it.cost>0;
+    if(review){A.push(Object.assign({},base,{type:"review",value:it.cost*PER_MONTH,
+      title:"Review "+it.name+" at this store",
+      text:"Sells "+it.perDay.toFixed(1)+" a day and wastes "+pct(it.rate,0)+" of what is made"+sim+" (4 weeks: sold "+n0(it.sold)+", wasted "+n0(it.waste)+", "+money(it.cost)+")."+fellTxt+" Make fewer, or take it off the menu here.",days:cut,daysKind:"cut"}))}
+    else if(cutWd.length){var v=cut.reduce(function(a,c){return a+c},0)*it.unitCost*(30/7);
+      var groups={};cutWd.forEach(function(wd){(groups[cut[wd]]=groups[cut[wd]]||[]).push(wd)});
+      var parts=Object.keys(groups).sort(function(a,b){return b-a}).map(function(q){return(q+" fewer on "+dayGroups(groups[q])).replace(" on every day"," every day")});
+      A.push(Object.assign({},base,{type:"cut",value:v,title:"Make "+parts.join(", ")+": "+it.name,
+        text:"Wasted "+pct(it.rate,0)+" of what was made"+sim+" (4 weeks: sold "+n0(it.sold)+", wasted "+n0(it.waste)+"). At least that many were left on every one of those days."+fellTxt,days:cut,daysKind:"cut"}))}
+    if(addWd.length){var va=add.reduce(function(a,c){return a+c},0)*it.unitPrice*(30/7);
+      A.push(Object.assign({},base,{type:"add",value:va,title:(function(){var g={};addWd.forEach(function(wd){(g[add[wd]]=g[add[wd]]||[]).push(wd)});
+          return"Make "+Object.keys(g).sort(function(a,b){return b-a}).map(function(q){return(q+" more on "+dayGroups(g[q])).replace(" on every day"," every day")}).join(", ")+": "+it.name})(),
+        text:"Nothing left at the end of the day on any "+addWd.map(function(w){return DOWL[w]}).join(" or ")+" in the last 4 weeks, while other days do have waste. It probably sells out; worth trying a little more.",days:add,daysKind:"add"}))}
+  });
+  A.sort(function(a,b){return(b.value||0)-(a.value||0)});
+  // store table
+  var rows=[];S.forEach(function(s){var f=food.get(s.code);if(!f||!f.cost)return;
+    var a=A.filter(function(x){return x.store===s});
+    rows.push({s:s,cost:f.cost,pct:s.sales>0?f.cost/s.sales:null,linked:f.linked/f.cost,
+      save:a.filter(function(x){return x.type!=="add"}).reduce(function(t,x){return t+x.value},0),
+      extra:a.filter(function(x){return x.type==="add"}).reduce(function(t,x){return t+x.value},0),n:a.length,noMM:!mmDays.has(s.code)})});
+  rows.sort(function(a,b){return b.save-a.save||b.cost-a.cost});
+  var tot={cost:0,sales:0,linked:0};rows.forEach(function(r){tot.cost+=r.cost;tot.linked+=r.linked*r.cost;r.s.sales&&(tot.sales+=r.s.sales)});
+  return{win:win,rows:rows,actions:A,tot:tot,unlinked:[...unl.entries()].sort(function(a,b){return b[1]-a[1]}),
+    save:rows.reduce(function(t,r){return t+r.save},0),extra:rows.reduce(function(t,r){return t+r.extra},0),missing:MM.missing||[]};
+}
+
+/* ---------- page ---------- */
+TAB_META.wastemix={section:"tabWasteMix",title:"Waste & Mix",sub:"Food wastage against what each store sold: what to make less of, and what may be selling out."};
+var sec=document.createElement("div");sec.className="view-section";sec.id="tabWasteMix";
+sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-scale-balanced"></i> Waste &amp; Mix<span class="right" id="wmAsOf"></span></div>'+
+  '<div class="pace-kpis" id="wmKpis"></div><div id="wmState"></div></div>'+
+  '<div class="wm-grid" id="wmMain" style="display:none">'+
+   '<div class="panel" style="padding:0;overflow:hidden"><div class="panel-title" style="padding:14px 16px 0">Stores by money that could be saved<span class="right"><button type="button" class="export-btn excel" id="wmExcel"><i class="fas fa-file-excel"></i> Excel</button></span></div>'+
+    '<div class="table-container" style="max-height:620px;overflow:auto"><table id="wmStores"><thead><tr><th class="left-cell">Store</th><th>Food waste</th><th>% of sales</th><th>Could save / month</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>'+
+   '<div class="panel" style="padding:0;overflow:hidden"><div class="panel-title" style="padding:14px 16px 0"><span id="wmSelTitle">Actions</span></div><div id="wmActs"></div></div>'+
+  '</div>'+
+  '<div class="panel"><div class="wm-note" id="wmHow"><b>How it works.</b> The last 4 weeks of food wastage (items 1080… and 1089…), store by store, against what Menu Mix says the store sold of the same item. '+
+  'What was made is taken as sold + wasted. <b>Make fewer</b>: on that weekday at least that many were wasted on every one of the last 4 such days, so making that many fewer would not have lost a sale. '+
+  '<b>Make more</b>: nothing was wasted on any of those days (while other days do have waste), so the item probably sells out. <b>Review</b>: 35% or more wasted while selling 5 or fewer a day. '+
+  'Money per month: fewer × wastage cost per piece, or more × selling price. Follows the Manager, Store, Segment and Format filters and the search box.<div id="wmUnl" style="margin-top:8px"></div></div></div>';
+var anchor=document.getElementById("tabAlerts")||document.getElementById("tabWastage");anchor?anchor.after(sec):document.querySelector(".dashboard").appendChild(sec);
+var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="wastemix";nb.title="Waste & Mix";
+nb.innerHTML='<i class="fas fa-scale-balanced"></i><span class="nav-label">Waste &amp; Mix</span>';
+var ab=document.querySelector('.tab-btn[data-tab="wastage"]');ab?ab.after(nb):document.querySelector(".sidebar-nav").appendChild(nb);
+nb.addEventListener("click",function(){switchTab("wastemix")});
+try{Object.assign(AR_TEXT,{"Waste & Mix":"الهدر والمبيعات"})}catch(e){}
+
+function kpi(k,v,s,cls){return'<div class="pace-kpi"><div class="k">'+k+'</div><div class="v '+(cls||"")+'">'+v+'</div><div class="s">'+(s||"&nbsp;")+"</div></div>"}
+function state(html,isErr){document.getElementById("wmState").innerHTML=html?'<div class="wm-msg'+(isErr?" err":"")+'">'+html+"</div>":"";document.getElementById("wmMain").style.display=html?"none":""}
+function strip(a){return'<div class="wm-dw">'+a.days.map(function(v,wd){return"<i"+(v?' class="'+a.daysKind+'"':"")+">"+DOWS[wd]+" "+(v?(a.daysKind==="add"?"+":"−")+v:"0")+"</i>"}).join("")+"</div>"}
+function renderActs(){
+  var box=document.getElementById("wmActs"),t=document.getElementById("wmSelTitle");
+  var row=R.rows.find(function(r){return r.s.code===sel})||R.rows[0];if(!row){box.innerHTML='<div class="wm-msg">No food wastage for the stores in the current filters.</div>';t.textContent="Actions";return}
+  sel=row.s.code;t.textContent="Actions for "+row.s.name+(row.s.area?" ("+row.s.area+")":"");
+  document.querySelectorAll("#wmStores tr[data-c]").forEach(function(tr){tr.classList.toggle("sel",tr.dataset.c===sel)});
+  if(row.noMM){box.innerHTML='<div class="wm-msg">Menu Mix has no item sales for this store in these weeks, so waste can\'t be compared with sales here.</div>';return}
+  var a=R.actions.filter(function(x){return x.store===row.s});
+  box.innerHTML=a.length?a.map(function(x){var ic={cut:"fa-arrow-down",add:"fa-arrow-up",review:"fa-magnifying-glass"}[x.type];
+    return'<div class="wm-act"><div class="wm-ic '+x.type+'"><i class="fas '+ic+'"></i></div><div><div class="wm-t">'+esc(x.title)+(x.fell?'<span class="wm-flag">sales fell, waste didn\'t</span>':"")+'</div>'+
+      '<div class="wm-d">'+esc(x.text)+"</div>"+(x.type==="review"&&!x.days.some(Boolean)?"":strip(x))+"</div>"+
+      '<div class="wm-v" style="color:var(--'+(x.type==="add"?"success":"danger")+')">'+(x.type==="add"?"+":"")+money(x.value)+"<small>"+(x.type==="add"?"possible sales / month":"waste / month")+"</small></div></div>"}).join(""):
+    '<div class="wm-msg">No actions for this store. Food waste here is low or not regular enough to act on.</div>'}
+function render(){
+  if(!R)return;
+  var w=R.win;document.getElementById("wmAsOf").textContent=labelDay(w.from)+" – "+labelDay(w.to)+" (4 weeks)";
+  var cov=R.tot.cost>0?R.tot.linked/R.tot.cost:0;
+  document.getElementById("wmKpis").innerHTML=kpi("Food waste, 4 weeks",money(R.tot.cost),R.tot.sales>0?pct(R.tot.cost/R.tot.sales,2)+" of sales":"","")+
+    kpi("Could be saved",money(R.save),"a month, from "+R.actions.filter(function(x){return x.type!=="add"}).length+" actions","bad")+
+    kpi("Possible extra sales",money(R.extra),(function(n){return"a month, "+n+(n===1?" item may":" items may")+" sell out"})(R.actions.filter(function(x){return x.type==="add"}).length),"good")+
+    kpi("Waste linked to Menu Mix",pct(cov,0),"of food waste cost",cov<.8?"warn":"");
+  if(!R.rows.length){state("No food wastage for the stores in the current filters in these 4 weeks.");return}
+  state("");
+  document.querySelector("#wmStores tbody").innerHTML=R.rows.map(function(r){
+    return'<tr data-c="'+esc(r.s.code)+'"><td class="left-cell">'+esc(r.s.name)+'<div style="font-size:.7rem;color:var(--text-light)">'+esc(r.s.area||"")+"</div></td><td>"+money(r.cost)+"</td>"+
+      '<td class="'+(r.pct!=null&&r.pct>=.05?"pct-down":"")+'">'+pct(r.pct,1)+"</td><td>"+(r.noMM?'<span style="color:var(--text-light)">no Menu Mix</span>':money(r.save))+"</td><td>"+(r.n||"—")+"</td></tr>"}).join("");
+  var u=R.unlinked.slice(0,6);
+  document.getElementById("wmUnl").innerHTML=u.length?"<b>Not linked yet</b> (fill these in the item map to include them): "+u.map(function(x){return esc(x[0])+" ("+money(x[1])+")"}).join(", ")+(R.unlinked.length>6?" and "+(R.unlinked.length-6)+" more.":"."):"";
+  renderActs()}
+async function load(){
+  if(loading)return loading;
+  loading=(async function(){
+    try{
+      if(!(window.__rawData||[]).length){R=null;document.getElementById("wmKpis").innerHTML="";return state("Load sales data to see this page.")}
+      if(!(window.__wastageData||[]).length){
+        state('<i class="fas fa-spinner fa-spin"></i> Loading wastage…');
+        if(window.__loadWastageOnDemand){try{await window.__loadWastageOnDemand()}catch(e){}}
+        for(var i=0;i<60&&!(window.__wastageData||[]).length;i++)await new Promise(function(r){setTimeout(r,500)});
+        if(!(window.__wastageData||[]).length){R=null;return state("No wastage data loaded. Open the Wastage tab or upload the wastage file first.")}}
+      var win=wasteWindow();if(!win){R=null;return state("No food wastage in the wastage data.")}
+      var key=win.from+"|"+win.to;
+      if(!MM||MMkey!==key){
+        state('<i class="fas fa-spinner fa-spin"></i> Loading item sales from Menu Mix for '+labelDay(win.from)+" – "+labelDay(win.to)+"… (the first time takes a little while)");
+        var items=[...new Set(Object.keys(WASTE_MM_MAP).map(function(k){return WASTE_MM_MAP[k]}))];
+        var d=await askDaily({from:isoOf(win.from),to:isoOf(win.to),items:items});
+        if(!d.ok)throw Error("Menu Mix: "+(d.error||"something went wrong"));
+        MM=d;MMkey=key}
+      R=compute(win);render();
+    }catch(e){console.error("Waste & Mix",e);R=null;state(esc(e.message||e),!0)}
+  })();
+  try{await loading}finally{loading=null}}
+function refresh(){if(!sec.classList.contains("active"))return;MM?(function(){var w=wasteWindow();if(w&&MMkey===w.from+"|"+w.to){try{R=compute(w);render()}catch(e){console.error(e)}}else load()})():load()}
+document.querySelector("#wmStores tbody").addEventListener("click",function(e){var tr=e.target.closest("tr[data-c]");tr&&(sel=tr.dataset.c,renderActs())});
+document.getElementById("wmExcel").addEventListener("click",function(){
+  if(!R||!R.actions.length)return void showToast("Nothing to export","info");if(typeof librariesReady==="function"&&!librariesReady())return;
+  var self=this,go=async function(){
+    var aoa=[["Store","Manager","Action","Item","Details","Sun","Mon","Tue","Wed","Thu","Fri","Sat","Waste rate","Sold (4 wk)","Wasted (4 wk)","Money / month"]];
+    R.actions.forEach(function(a){aoa.push([a.store.name,a.store.area||"",{cut:"Make fewer",add:"Make more",review:"Review"}[a.type],a.name,a.text].concat(a.days.map(function(v){return v?(a.daysKind==="add"?"+":"-")+v:""})).concat([Math.round(a.rate*1000)/10+"%",Math.round(a.sold),Math.round(a.waste),Math.round(a.value)]))});
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(aoa,{cols:[28,16,12,26,80,6,6,6,6,6,6,6,10,10,10,12]}),"Waste & Mix");
+    await downloadWorkbook(wb,"Waste_and_Mix_"+isoOf(R.win.to)+".xlsx");showToast("Excel exported","success")};
+  typeof guardBusy==="function"?guardBusy(self,"Exporting…",go):go()});
+var t=null;function soon(){clearTimeout(t);t=setTimeout(refresh,60)}
+document.addEventListener("dashboard:filtered",soon);
+new MutationObserver(function(){sec.classList.contains("active")&&refresh()}).observe(sec,{attributes:!0,attributeFilter:["class"]});
+}();</script>
+
 </body>
 </html>

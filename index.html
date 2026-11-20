@@ -2850,7 +2850,7 @@ new MutationObserver(function(){sec.classList.contains("active")&&refresh()}).ob
 }();</script>
 
 <!-- =====================================================================
-     ADD-ON v8.2 (new code only): navigation groups, module access by role, Menu Mix theme
+     ADD-ON v8.3 (new code only): navigation groups, module access by role, Menu Mix theme
      1. Sidebar in collapsible groups: Overview, Sales, Wastage, Product Mix, Projection & Alerts.
         Every group starts closed and opens when clicked (v8.2).
         Manager report moves from the Actions menu into Projection & Alerts. The Menu Mix button
@@ -2881,15 +2881,18 @@ html.sb-collapsed .nav-gh{display:none}
 html.sb-collapsed .nav-gi{display:flex!important;padding:0;margin:0;border:0;border-top:1px solid var(--sb-border);padding-top:4px}
 .vx-hidden{display:none!important}
 html.vx-no-mm #mmLink{display:none!important}
-#maOverlay .dialog-box{max-width:640px}
-#maTable{width:100%;border-collapse:collapse;font-size:.82rem;margin:10px 0 4px}
-#maTable th,#maTable td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:center}
-#maTable th{font-size:.7rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
-#maTable td:first-child,#maTable th:first-child{text-align:start}
-#maTable td:first-child b{display:block;color:var(--text-main)}
-#maTable td:first-child small{color:var(--text-light);font-size:.72rem}
-#maTable input{width:17px;height:17px;accent-color:var(--primary);cursor:pointer}
-#maTable input:disabled{cursor:not-allowed;opacity:.6}
+#maOverlay{align-items:center}
+#maOverlay .dialog-box{max-width:min(1000px,96vw)!important;width:96vw}
+.ma-grid{display:grid;grid-template-columns:minmax(260px,1.6fr) repeat(5,minmax(92px,1fr));margin:14px 0 6px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.ma-grid>div{padding:12px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:center;text-align:center}
+.ma-grid>.ma-h{background:var(--surface-hover);font-size:.7rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1.3}
+.ma-grid>.ma-m{justify-content:flex-start;text-align:start;flex-direction:column;align-items:flex-start;gap:2px}
+.ma-grid>.ma-m b{color:var(--text-main);font-size:.88rem}
+.ma-grid>.ma-m small{color:var(--text-light);font-size:.74rem;line-height:1.4}
+.ma-grid>.ma-last{border-bottom:0}
+.ma-grid input{width:18px;height:18px;accent-color:var(--primary);cursor:pointer;margin:0}
+.ma-grid input:disabled{cursor:not-allowed;opacity:.6}
+@media (max-width:760px){.ma-grid{grid-template-columns:minmax(150px,1.4fr) repeat(5,minmax(56px,1fr))}.ma-grid>.ma-h{font-size:.6rem}}
 </style>
 <script>!function(){
 "use strict";
@@ -2996,7 +2999,7 @@ var ma=document.createElement("div");ma.className="modal-overlay";ma.id="maOverl
 ma.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" aria-label="Module access"><div class="dialog-body">'+
   '<h3><i class="fas fa-user-shield"></i> Module access</h3><p>Choose which roles can see each part of the dashboard. Overview is always shown, and admins always see everything. '+
   'This hides pages in the dashboard; the stores a person can see are still set in Manage users.</p>'+
-  '<table id="maTable"></table><div class="dialog-error" id="maErr"></div></div>'+
+  '<div class="ma-grid" id="maTable"></div><div class="dialog-error" id="maErr"></div></div>'+
   '<div class="dialog-actions"><button class="btn btn-outline" type="button" id="maCancel">Cancel</button><button class="btn btn-primary" type="button" id="maSave"><i class="fas fa-floppy-disk"></i> Save</button></div></div>';
 document.body.appendChild(ma);
 function closeMa(){ma.classList.remove("open")}
@@ -3005,17 +3008,17 @@ document.addEventListener("keydown",function(e){e.key==="Escape"&&ma.classList.c
 function openMa(){
   var tp=$("toolsPanel");tp&&tp.classList.remove("open");
   var on=function(m,r){return r==="admin"||!ACCESS||!Array.isArray(ACCESS[m])||ACCESS[m].indexOf(r)>=0};
-  $("maTable").innerHTML="<thead><tr><th>Module</th>"+ROLES.map(function(r){return"<th>"+ROLE_NAME[r]+"</th>"}).join("")+"</tr></thead><tbody>"+
-    MODULES.map(function(m){return'<tr><td><b>'+m.label+"</b><small>"+m.sub+"</small></td>"+ROLES.map(function(r){
-      return'<td><input type="checkbox" data-m="'+m.id+'" data-r="'+r+'"'+(on(m.id,r)?" checked":"")+(r==="admin"?' disabled title="Admins always see everything"':"")+"></td>"}).join("")+"</tr>"}).join("")+"</tbody>";
-  $("maErr").textContent=setupMissing?'One-time setup needed: run "Module access setup.sql" in Supabase (SQL Editor), then reopen this.':"";
+  $("maTable").innerHTML='<div class="ma-h ma-m">Module</div>'+ROLES.map(function(r){return'<div class="ma-h">'+ROLE_NAME[r]+"</div>"}).join("")+
+    MODULES.map(function(m,i){var last=i===MODULES.length-1?" ma-last":"";return'<div class="ma-m'+last+'"><b>'+m.label+"</b><small>"+m.sub+"</small></div>"+ROLES.map(function(r){
+      return'<div class="'+last.trim()+'"><input type="checkbox" aria-label="'+m.label+" - "+ROLE_NAME[r]+'" data-m="'+m.id+'" data-r="'+r+'"'+(on(m.id,r)?" checked":"")+(r==="admin"?' disabled title="Admins always see everything"':"")+"></div>"}).join("")}).join("");
+  $("maErr").textContent=setupMissing?'One-time setup needed: in Supabase (the Sales project) open SQL Editor, paste "Module access setup.sql" (in the Dashboard code folder, Sales) and click Run, then reopen this.':"";
   ma.classList.add("open")}
 $("maSave").addEventListener("click",async function(){
   var acc={};MODULES.forEach(function(m){acc[m.id]=["admin"]});
   document.querySelectorAll("#maTable input[data-m]").forEach(function(c){c.checked&&c.dataset.r!=="admin"&&acc[c.dataset.m].push(c.dataset.r)});
   var btn=this;btn.disabled=!0;$("maErr").textContent="";
   try{var r=await window.__sb.rpc("admin_set_module_access",{p_access:acc});
-    if(r.error){$("maErr").textContent=/admin_set_module_access|function/.test(r.error.message)?'One-time setup needed: run "Module access setup.sql" in Supabase (SQL Editor). ('+r.error.message+")":"Could not save: "+r.error.message;return}
+    if(r.error){$("maErr").textContent=/admin_set_module_access|function/.test(r.error.message)?'One-time setup needed: in Supabase (the Sales project) open SQL Editor, paste "Module access setup.sql" (in the Dashboard code folder, Sales) and click Run. ('+r.error.message+")":"Could not save: "+r.error.message;return}
     ACCESS=acc;setupMissing=!1;applyAccess();closeMa();
     typeof showToast==="function"&&showToast("Module access saved. Others see the change the next time they open the dashboard.","success");
   }catch(e){$("maErr").textContent="Could not save: "+(e.message||e)}finally{btn.disabled=!1}});

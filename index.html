@@ -1221,5 +1221,1259 @@ function go(){if(done||!window.__loggedIn)return;done=!0;f.getAttribute("src")||
 document.addEventListener("dashboard:filtered",function(){if(done||!window.__loggedIn||!(window.__rawData||[]).length||!used())return;
   setTimeout(function(){window.requestIdleCallback?requestIdleCallback(go,{timeout:2000}):go()},2000)});
 }();</script>
+<!-- =====================================================================
+     ADD-ON v7.1 (new code only; nothing above this line was changed)
+     1. Target Pace tab     : month-end projection, gap to target, sales needed per day
+     2. Same-weekday YoY    : panel on the YoY Compare tab, with Saudi event markers (editable)
+     3. Manager report card : one-page PDF per area manager (Actions menu or Target Pace tab)
+     Reads the dashboard's existing data and filters; does not change any existing calculation.
+     ===================================================================== -->
+<style>
+.pace-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:12px}
+.pace-kpi{background:var(--surface-hover);border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0}
+.pace-kpi .k{font-size:.74rem;color:var(--text-muted);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pace-kpi .v{font-size:1.2rem;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-main)}
+.pace-kpi .s{font-size:.72rem;color:var(--text-light);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pace-kpi .v.good{color:var(--success)}.pace-kpi .v.warn{color:var(--warning)}.pace-kpi .v.bad{color:var(--danger)}
+.pace-note{font-size:.78rem;color:var(--text-muted);line-height:1.55}
+.pace-note b{color:var(--text-main);font-weight:600}
+.pace-status{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.7rem;font-weight:700;white-space:nowrap}
+.pace-status.on{background:var(--success-light);color:var(--success)}
+.pace-status.risk{background:var(--warning-light);color:var(--warning)}
+.pace-status.off{background:var(--danger-light);color:var(--danger)}
+.pace-status.none{background:var(--border);color:var(--text-muted)}
+.pace-meter{display:inline-block;width:54px;height:6px;border-radius:6px;background:var(--border);vertical-align:middle;margin-inline-end:8px;overflow:hidden}
+.pace-meter>span{display:block;height:100%;border-radius:6px}
+.ev-chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.68rem;font-weight:600;margin:1px 3px 1px 0;white-space:nowrap}
+.ev-ramadan{background:rgba(124,58,237,.12);color:#6d28d9}
+.ev-eid{background:rgba(22,163,74,.13);color:#15803d}
+.ev-national{background:rgba(217,119,6,.15);color:#b45309}
+.ev-other{background:var(--primary-light);color:var(--primary)}
+[data-theme="dark"] .ev-ramadan{color:#c4b5fd}[data-theme="dark"] .ev-eid{color:#86efac}[data-theme="dark"] .ev-national{color:#fcd34d}
+.sw-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-inline-start:auto}
+.sw-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.74rem;color:var(--text-muted);margin-top:10px;align-items:center}
+.sw-legend i.sq{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-inline-end:5px}
+#evEditText{width:100%;min-height:260px;margin-top:12px;border-radius:10px;border:1px solid var(--border-strong);background:var(--bg);color:var(--text-main);padding:10px 12px;font:12.5px/1.6 ui-monospace,Consolas,monospace;resize:vertical}
+#mgrReportModal select,#mgrReportModal .mr-row{width:100%}
+#mgrReportModal select{height:40px;margin-top:6px;border-radius:10px;border:1px solid var(--border-strong);background:var(--bg);color:var(--text-main);padding:0 10px;font-size:.9rem}
+#mgrReportModal label{display:block;font-size:.78rem;font-weight:600;color:var(--text-muted);margin-top:12px}
+</style>
+<script>!function(){
+"use strict";
+if(typeof FilterState==="undefined"||typeof TAB_META==="undefined"||typeof switchTab!=="function")return;
+
+/* ---------- small helpers (new) ---------- */
+var pad=function(n){return String(n).padStart(2,"0")};
+var dayNum=function(y,m,d){return Math.round(Date.UTC(y,m-1,d)/864e5)};            // days since 1970-01-01
+var wdOf=function(n){return((n%7)+7+4)%7};                                          // 0=Sun … 6=Sat
+var fromNum=function(n){var t=new Date(n*864e5);return{y:t.getUTCFullYear(),m:t.getUTCMonth()+1,d:t.getUTCDate()}};
+var isoOf=function(n){var p=fromNum(n);return p.y+"-"+pad(p.m)+"-"+pad(p.d)};
+var dim=function(y,m){return new Date(y,m,0).getDate()};
+var labelDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]+" "+p.y};
+var shortDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]};
+var DOW3=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+var pct=function(v,dp){return v==null||!isFinite(v)?"—":(v*100).toFixed(dp==null?1:dp)+"%"};
+var sgn=function(v){return v==null||!isFinite(v)?"—":(v>=0?"+":"")+(v*100).toFixed(1)+"%"};
+var growth=function(a,b){return b>0&&a>0?a/b-1:null};
+var closedOn=function(code,wd){return typeof WEEKEND_CLOSED!=="undefined"&&WEEKEND_CLOSED.has(String(code).trim())&&(wd===5||wd===6)};
+var rowNum=function(r){return r.year&&r.month&&r.day!=null?dayNum(r.year,r.month,r.day):null};
+function onTab(id){var s=document.getElementById(id);return!!(s&&s.classList.contains("active"))}
+function ctx(){return window.__getMonthContext?window.__getMonthContext():null}
+function targetMaps(){return window.__dbTargetMaps||window.__targetMaps||null}
+// the dashboard's store / manager / segment / format filters and search (period filters are handled per feature)
+function scopePass(r){
+  var ns=function(k){return typeof narrowedSelection==="function"&&FilterState[k]&&FilterState[k].options.length?narrowedSelection(k):null};
+  var st=ns("store"),ar=ns("area"),sg=ns("segment"),fm=ns("format");
+  if(st&&!st.has(r.storeCode))return!1;if(ar&&!ar.has(r.area))return!1;
+  if(sg&&!sg.has(r.segment))return!1;if(fm&&!fm.has(r.format))return!1;
+  var q=typeof globalSearchTerm!=="undefined"?globalSearchTerm:"";
+  return!q||(r.store+" "+r.storeCode+" "+r.area).toLowerCase().includes(q);
+}
+function storeName(r){var s=String(r.store||"");return s.startsWith(String(r.storeCode))?s:r.storeCode+" - "+s}
+function exportTable(tableEl,sheet,file){
+  if(!librariesReady()||!window.__tableToAoa)return;
+  return guardBusy(this,"Exporting…",async function(){
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(window.__tableToAoa(tableEl,!0)),sheet.slice(0,31));
+    await downloadWorkbook(wb,file+"_"+(new Date).toISOString().slice(0,10)+".xlsx");showToast("Excel exported","success")});
+}
+// Arabic labels for the new pages (used only when the language is Arabic)
+try{Object.assign(AR_TEXT,{"Target Pace":"وتيرة الهدف","Manager report":"تقرير المدير","Same-weekday comparison":"مقارنة بنفس يوم الأسبوع","Events":"المناسبات","On track":"على المسار","At risk":"معرض للخطر","Off track":"خارج المسار","No target":"بدون هدف","By manager":"حسب المدير","By store":"حسب الفرع"})}catch(e){}
+
+/* =====================================================================
+   EVENTS (Saudi calendar) – editable list kept in this browser
+   ===================================================================== */
+var EV_KEY="dashEventsV1";
+var DEFAULT_EVENTS=[
+  ["2024-02-22","2024-02-22","Founding Day"],["2024-03-11","2024-04-09","Ramadan"],["2024-04-10","2024-04-13","Eid al-Fitr"],
+  ["2024-06-15","2024-06-15","Arafat Day"],["2024-06-16","2024-06-19","Eid al-Adha"],["2024-09-23","2024-09-23","National Day"],
+  ["2025-02-22","2025-02-22","Founding Day"],["2025-03-01","2025-03-29","Ramadan"],["2025-03-30","2025-04-02","Eid al-Fitr"],
+  ["2025-06-05","2025-06-05","Arafat Day"],["2025-06-06","2025-06-09","Eid al-Adha"],["2025-09-23","2025-09-23","National Day"],
+  ["2026-02-18","2026-03-19","Ramadan"],["2026-02-22","2026-02-22","Founding Day"],["2026-03-20","2026-03-23","Eid al-Fitr"],
+  ["2026-05-26","2026-05-26","Arafat Day"],["2026-05-27","2026-05-30","Eid al-Adha"],["2026-09-23","2026-09-23","National Day"],
+  ["2027-02-08","2027-03-09","Ramadan (expected)"],["2027-02-22","2027-02-22","Founding Day"],["2027-03-10","2027-03-13","Eid al-Fitr (expected)"],
+  ["2027-05-16","2027-05-19","Eid al-Adha (expected)"],["2027-09-23","2027-09-23","National Day"]
+];
+var evCache=null;
+function evList(){
+  if(evCache)return evCache;var src=DEFAULT_EVENTS;
+  try{var s=JSON.parse(localStorage.getItem(EV_KEY));Array.isArray(s)&&(src=s)}catch(e){}
+  evCache=src.map(function(e){var a=e[0].split("-").map(Number),b=e[1].split("-").map(Number);return{from:dayNum(a[0],a[1],a[2]),to:dayNum(b[0],b[1],b[2]),name:e[2]}});
+  return evCache;
+}
+function evType(n){return/ramadan/i.test(n)?"ramadan":/eid|arafat/i.test(n)?"eid":/national|founding|flag/i.test(n)?"national":"other"}
+var EV_COLOR={ramadan:"rgba(124,58,237,.13)",eid:"rgba(22,163,74,.16)",national:"rgba(217,119,6,.18)",other:"rgba(47,91,216,.12)"};
+var EV_SOLID={ramadan:"#7c3aed",eid:"#16a34a",national:"#d97706",other:"#2f5bd8"};
+function eventsOn(n){return evList().filter(function(e){return n>=e.from&&n<=e.to})}
+function eventsBetween(a,b){return evList().filter(function(e){return e.to>=a&&e.from<=b})}
+function evChips(list){return list.map(function(e){return'<span class="ev-chip ev-'+evType(e.name)+'">'+escapeHtml(e.name)+"</span>"}).join("")}
+function evRangeText(e,a,b){var f=Math.max(e.from,a),t=Math.min(e.to,b);return e.name+" ("+(f===t?shortDay(f):shortDay(f)+" – "+shortDay(t))+")"}
+
+// event editor
+var evModal=document.createElement("div");evModal.className="modal-overlay";evModal.id="eventsModal";
+evModal.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" aria-label="Events" style="max-width:560px;">'+
+ '<div class="dialog-body"><h3><i class="fas fa-calendar-plus"></i> Events</h3>'+
+ '<p>One event per line: <b>start date, end date, name</b> (dates as YYYY-MM-DD). For a single day you can write <b>date, name</b>. Names with Ramadan, Eid, National or Founding get their own colour. The list is saved in this browser.</p>'+
+ '<textarea id="evEditText" spellcheck="false"></textarea><div class="dialog-error" id="evEditErr"></div></div>'+
+ '<div class="dialog-actions"><button class="btn btn-outline" type="button" id="evReset">Restore defaults</button><span style="flex:1"></span>'+
+ '<button class="btn btn-outline" type="button" id="evCancel">Cancel</button><button class="btn btn-primary" type="button" id="evSave">Save</button></div></div>';
+document.body.appendChild(evModal);
+function openEvents(){
+  var src=DEFAULT_EVENTS;try{var s=JSON.parse(localStorage.getItem(EV_KEY));Array.isArray(s)&&(src=s)}catch(e){}
+  document.getElementById("evEditText").value=src.map(function(e){return e[0]===e[1]?e[0]+", "+e[2]:e[0]+", "+e[1]+", "+e[2]}).join("\n");
+  document.getElementById("evEditErr").textContent="";evModal.classList.add("open");
+}
+function closeEvents(){evModal.classList.remove("open")}
+document.getElementById("evCancel").addEventListener("click",closeEvents);
+evModal.addEventListener("click",function(e){e.target===evModal&&closeEvents()});
+document.getElementById("evReset").addEventListener("click",function(){
+  try{localStorage.removeItem(EV_KEY)}catch(e){}evCache=null;closeEvents();refreshAll();showToast("Events restored to the default list","info")});
+document.getElementById("evSave").addEventListener("click",function(){
+  var out=[],bad=[],re=/^\d{4}-\d{2}-\d{2}$/;
+  document.getElementById("evEditText").value.split(/\r?\n/).forEach(function(line,i){
+    if(!line.trim())return;var p=line.split(",").map(function(s){return s.trim()});
+    var a=p[0],b,n;if(re.test(p[1]||"")){b=p[1];n=p.slice(2).join(", ")}else{b=a;n=p.slice(1).join(", ")}
+    if(!re.test(a)||!n||isNaN(Date.parse(a))||isNaN(Date.parse(b))||b<a)bad.push(i+1);else out.push([a,b,n]);
+  });
+  if(bad.length){document.getElementById("evEditErr").textContent="Check line"+(bad.length>1?"s ":" ")+bad.slice(0,6).join(", ")+".";return}
+  try{localStorage.setItem(EV_KEY,JSON.stringify(out))}catch(e){}
+  evCache=null;closeEvents();refreshAll();showToast("Events saved ("+out.length+")","success");
+});
+
+/* =====================================================================
+   1. TARGET PACE
+   ===================================================================== */
+// Projection for one month. scopeFn picks the rows (dashboard filters, or one manager for the report).
+function paceCompute(scopeFn,Y,M){
+  var raw=window.__rawData||[],tm=targetMaps();if(!raw.length)return null;
+  var asOf=0;raw.forEach(function(r){r.year===Y&&r.month===M&&r.day!=null&&r.net>0&&r.day>asOf&&(asOf=r.day)});
+  if(!asOf)return{Y:Y,M:M,asOf:0,rows:[]};
+  var D=dim(Y,M),endN=dayNum(Y,M,asOf),startN=endN-27,stores=new Map(),hist=new Map();
+  raw.forEach(function(r){
+    if(!scopeFn(r))return;var n=rowNum(r);if(n==null)return;var k=r.storeCode+"||"+r.area;
+    if(r.year===Y&&r.month===M&&r.day<=asOf){
+      var s=stores.get(k);s||stores.set(k,s={key:k,store:storeName(r),storeCode:r.storeCode,area:r.area,segment:r.segment,format:r.format,mtd:0,orders:0,sold:new Set});
+      s.mtd+=r.net||0;s.orders+=r.orders||0;r.net>0&&s.sold.add(r.day);
+    }
+    if(n>=startN&&n<=endN){var h=hist.get(k);h||hist.set(k,h=new Map);h.set(n,(h.get(n)||0)+(r.net||0))}
+  });
+  var rows=[];
+  stores.forEach(function(s){
+    var ws=[0,0,0,0,0,0,0],wc=[0,0,0,0,0,0,0],as=0,ac=0,h=hist.get(s.key);
+    h&&h.forEach(function(v,n){if(v>0){var w=wdOf(n);ws[w]+=v;wc[w]++;as+=v;ac++}});
+    var totalOpen=0,elapsedOpen=0,remOpen=0,proj=s.mtd,soldN=s.sold.size;
+    for(var d=1;d<=D;d++){
+      var n=dayNum(Y,M,d),w=wdOf(n);if(closedOn(s.storeCode,w))continue;totalOpen++;
+      if(d<=asOf){elapsedOpen++;continue}
+      remOpen++;proj+=wc[w]?ws[w]/wc[w]:ac?as/ac:soldN?s.mtd/soldN:0;
+    }
+    var full=0;
+    if(tm){var t=function(y){return tm.exact.get(s.storeCode+"||"+s.area+"||"+y+"||"+M)||tm.byCodeYearMonth.get(s.storeCode+"||"+y+"||"+M)||0};full=t(Y)||t(Y-1)}
+    var tgtToDate=totalOpen>0?full*elapsedOpen/totalOpen:0,projPct=full>0?proj/full:null;
+    rows.push(Object.assign(s,{full:full,proj:proj,projPct:projPct,tgtToDate:tgtToDate,achToDate:tgtToDate>0?s.mtd/tgtToDate:null,
+      gap:full>0?proj-full:null,avgDay:soldN?s.mtd/soldN:0,remOpen:remOpen,
+      needDay:full>0?(remOpen>0?Math.max(0,full-s.mtd)/remOpen:0):null,status:statusOf(projPct)}));
+  });
+  rows.sort(function(a,b){return(a.projPct==null)-(b.projPct==null)||(a.projPct||0)-(b.projPct||0)});
+  return{Y:Y,M:M,asOf:asOf,D:D,rows:rows};
+}
+function statusOf(p){return p==null?"none":p>=1?"on":p>=.9?"risk":"off"}
+var STATUS_TEXT={on:"On track",risk:"At risk",off:"Off track",none:"No target"};
+function statusPill(s){return'<span class="pace-status '+s+'">'+STATUS_TEXT[s]+"</span>"}
+function meter(p){if(p==null)return"";var c=p>=1?"var(--success)":p>=.9?"var(--warning)":"var(--danger)";return'<span class="pace-meter"><span style="width:'+Math.min(100,Math.max(0,p*100)).toFixed(0)+"%;background:"+c+'"></span></span>'}
+function groupPace(P,keyFn){
+  var g=new Map();
+  P.rows.forEach(function(r){var k=keyFn(r),x=g.get(k);g.has(k)||g.set(k,x={name:k,full:0,mtd:0,proj:0,tgtToDate:0,stores:0,on:0,risk:0,off:0,none:0});
+    x.full+=r.full;x.mtd+=r.mtd;x.proj+=r.proj;x.tgtToDate+=r.tgtToDate;x.stores++;x[r.status]++});
+  var rem=P.D-P.asOf;
+  return[...g.values()].map(function(x){return Object.assign(x,{projPct:x.full>0?x.proj/x.full:null,achToDate:x.tgtToDate>0?x.mtd/x.tgtToDate:null,
+    gap:x.full>0?x.proj-x.full:null,avgDay:P.asOf?x.mtd/P.asOf:0,needDay:x.full>0?(rem>0?Math.max(0,x.full-x.mtd)/rem:0):null,status:statusOf(x.full>0?x.proj/x.full:null)})});
+}
+
+// page
+TAB_META.pace={section:"tabPace",title:"Target Pace",sub:"Month-end projection against target, and what each store needs per day."};
+var paceSec=document.createElement("div");paceSec.className="view-section";paceSec.id="tabPace";
+paceSec.innerHTML=
+ '<div class="panel"><div class="panel-title"><i class="fas fa-gauge-high"></i> <span id="paceTitle">Target pace</span><span class="right" id="paceAsOf"></span></div>'+
+ '<div class="pace-kpis" id="paceKpis"></div><div class="pace-note" id="paceNote"></div></div>'+
+ '<div class="table-container"><div class="table-header-bar"><h3><i class="fas fa-user-tie"></i> By manager</h3><div class="table-controls">'+
+   '<button type="button" class="toggle-btn" id="paceReportBtn"><i class="fas fa-id-card"></i> Manager report</button>'+
+   '<button type="button" class="export-btn excel" id="paceMgrExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div>'+
+   '<div class="table-scroll" style="max-height:420px;"><table id="paceMgrTable"><thead><tr><th class="left-cell">Manager</th><th>Stores</th><th>Target (month)</th><th>Sales to date</th><th>Achieved to date</th><th>Projected month-end</th><th>Projected %</th><th>Gap at month-end</th><th>Avg / day so far</th><th>Needed / day</th><th class="left-cell">Stores off / at risk</th></tr></thead><tbody id="paceMgrBody"></tbody></table></div></div>'+
+ '<div class="table-container"><div class="table-header-bar"><h3><i class="fas fa-store"></i> By store</h3><div class="table-controls">'+
+   '<div class="segmented" id="paceFilter"><button type="button" class="seg-btn active" data-ps="all">All</button><button type="button" class="seg-btn" data-ps="off">Off track</button><button type="button" class="seg-btn" data-ps="risk">At risk</button><button type="button" class="seg-btn" data-ps="on">On track</button></div>'+
+   '<button type="button" class="export-btn excel" id="paceStoreExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div>'+
+   '<div class="table-scroll"><table id="paceStoreTable"><thead><tr><th class="left-cell">Store</th><th class="left-cell">Manager</th><th>Target (month)</th><th>Sales to date</th><th>Achieved to date</th><th>Projected month-end</th><th>Projected %</th><th>Gap at month-end</th><th>Avg / day so far</th><th>Needed / day</th><th>Open days left</th><th class="left-cell">Status</th></tr></thead><tbody id="paceStoreBody"></tbody></table></div></div>';
+var fmSec=document.getElementById("tabFormatAm");fmSec?fmSec.after(paceSec):document.querySelector(".dashboard").appendChild(paceSec);
+var navBtn=document.createElement("button");navBtn.className="tab-btn";navBtn.dataset.tab="pace";navBtn.title="Target Pace";
+navBtn.innerHTML='<i class="fas fa-gauge-high"></i><span class="nav-label">Target Pace</span>';
+var afterBtn=document.querySelector('.tab-btn[data-tab="formatam"]');afterBtn?afterBtn.after(navBtn):document.querySelector(".sidebar-nav").appendChild(navBtn);
+navBtn.addEventListener("click",function(){switchTab("pace")});
+
+var paceFilter="all",lastPace=null;
+document.getElementById("paceFilter").addEventListener("click",function(e){var b=e.target.closest("[data-ps]");if(!b)return;paceFilter=b.dataset.ps;
+  this.querySelectorAll("[data-ps]").forEach(function(x){x.classList.toggle("active",x===b)});renderPaceStores()});
+function kpi(k,v,s,cls){return'<div class="pace-kpi"><div class="k">'+k+'</div><div class="v '+(cls||"")+'">'+v+'</div><div class="s">'+(s||"&nbsp;")+"</div></div>"}
+function clsOf(p){return p==null?"":p>=1?"good":p>=.9?"warn":"bad"}
+function renderPace(){
+  if(!onTab("tabPace"))return;
+  var c=ctx(),kp=document.getElementById("paceKpis");
+  if(!c||!(window.__rawData||[]).length){kp.innerHTML="";document.getElementById("paceNote").textContent="Load sales data to see the target pace.";
+    document.getElementById("paceMgrBody").innerHTML=document.getElementById("paceStoreBody").innerHTML="";return}
+  var P=lastPace=paceCompute(scopePass,c.curY,c.curM);
+  document.getElementById("paceTitle").textContent="Target pace · "+MONTHS[c.curM-1]+" "+c.curY;
+  if(!P||!P.asOf){kp.innerHTML="";document.getElementById("paceAsOf").textContent="";document.getElementById("paceNote").textContent="No sales for "+MONTHS[c.curM-1]+" "+c.curY+" yet.";
+    document.getElementById("paceMgrBody").innerHTML=document.getElementById("paceStoreBody").innerHTML="";return}
+  var T={full:0,mtd:0,proj:0,tgt:0},cnt={on:0,risk:0,off:0,none:0};
+  P.rows.forEach(function(r){T.full+=r.full;T.mtd+=r.mtd;T.proj+=r.proj;T.tgt+=r.tgtToDate;cnt[r.status]++});
+  var done=P.asOf>=P.D,rem=P.D-P.asOf,pp=T.full>0?T.proj/T.full:null,ach=T.tgt>0?T.mtd/T.tgt:null,need=T.full>0&&rem>0?Math.max(0,T.full-T.mtd)/rem:null;
+  document.getElementById("paceAsOf").textContent="Data up to "+labelDay(dayNum(P.Y,P.M,P.asOf))+(done?" · month complete":" · "+rem+" day"+(rem===1?"":"s")+" left");
+  kp.innerHTML=
+    kpi("Target (month)",T.full>0?fmtCur(T.full):"—",cnt.none?cnt.none+" store"+(cnt.none===1?"":"s")+" without a target":"")+
+    kpi("Sales to date",fmtCur(T.mtd),"Days 1–"+P.asOf)+
+    kpi("Achieved to date",pct(ach),"vs target for the days so far",clsOf(ach))+
+    kpi(done?"Month-end actual":"Projected month-end",fmtCur(T.proj),pp!=null?pct(pp)+" of target":"",clsOf(pp))+
+    kpi("Gap at month-end",T.full>0?(T.proj-T.full>=0?"+":"")+fmtCur(T.proj-T.full):"—",T.full>0?(T.proj>=T.full?"ahead of target":"short of target"):"",T.full>0?(T.proj>=T.full?"good":"bad"):"")+
+    kpi("Needed per day",need==null?"—":fmtCur(need),need==null?"":"now "+fmtCur(T.mtd/P.asOf)+" per day",need!=null&&need>T.mtd/P.asOf?"bad":"good")+
+    kpi("Stores",'<span style="color:var(--success)">'+cnt.on+'</span> · <span style="color:var(--warning)">'+cnt.risk+'</span> · <span style="color:var(--danger)">'+cnt.off+"</span>","on track · at risk · off track");
+  var evs=eventsBetween(dayNum(P.Y,P.M,P.asOf+1),dayNum(P.Y,P.M,P.D)),a=dayNum(P.Y,P.M,P.asOf+1),b=dayNum(P.Y,P.M,P.D);
+  document.getElementById("paceNote").innerHTML=done?"The month is complete, so the projection equals actual sales.":
+    "<b>How the projection works:</b> sales so far, plus each store's average for that weekday over the last 4 weeks, for every open day left in the month (stores closed on weekends skip Friday and Saturday). "+
+    "<b>Needed per day</b> is what is left of the month's target divided by the open days left. Target achieved to date compares sales with the target for the open days so far. "+
+    (evs.length?"<br><b>Days left include:</b> "+evs.map(function(e){return'<span class="ev-chip ev-'+evType(e.name)+'">'+escapeHtml(evRangeText(e,a,b))+"</span>"}).join("")+" — the weekday averages do not allow for these, so adjust your expectations.":"");
+  // managers
+  var mg=groupPace(P,function(r){return r.area||"UNASSIGNED"}).sort(function(x,y){return(x.projPct==null)-(y.projPct==null)||(x.projPct||0)-(y.projPct||0)});
+  var row=function(x,isTotal){return"<tr"+(isTotal?' class="subtotal-row"':"")+'><td class="left-cell"><strong>'+escapeHtml(x.name)+"</strong></td><td>"+x.stores+"</td><td>"+(x.full>0?fmtCur(x.full):"—")+"</td><td>"+fmtCur(x.mtd)+"</td><td>"+pct(x.achToDate)+"</td><td>"+fmtCur(x.proj)+"</td>"+
+    '<td class="'+(x.projPct==null?"":x.projPct>=1?"pct-up":"pct-down")+'">'+(isTotal?"":meter(x.projPct))+pct(x.projPct)+"</td><td>"+(x.gap==null?"—":(x.gap>=0?"+":"")+fmtCur(x.gap))+"</td><td>"+fmtCur(x.avgDay)+"</td><td>"+(x.needDay==null?"—":fmtCur(x.needDay))+'</td><td class="left-cell">'+(isTotal?"":x.off+" / "+x.risk)+"</td></tr>"};
+  var tot={name:"TOTAL",stores:P.rows.length,full:T.full,mtd:T.mtd,proj:T.proj,achToDate:ach,projPct:pp,gap:T.full>0?T.proj-T.full:null,avgDay:T.mtd/P.asOf,needDay:need};
+  document.getElementById("paceMgrBody").innerHTML=mg.length?mg.map(function(x){return row(x)}).join("")+row(tot,!0):'<tr><td colspan="11" class="modal-empty">No stores in the current filters.</td></tr>';
+  renderPaceStores();
+}
+function renderPaceStores(){
+  var P=lastPace,body=document.getElementById("paceStoreBody");if(!P||!P.asOf){body.innerHTML="";return}
+  var list=P.rows.filter(function(r){return paceFilter==="all"||r.status===paceFilter});
+  body.innerHTML=list.length?list.map(function(r){
+    return'<tr class="store-clickable" data-pace-code="'+escapeAttr(r.storeCode)+'" data-pace-area="'+escapeAttr(r.area)+'" title="Click for day-wise detail"><td class="left-cell col-store"><strong>'+escapeHtml(r.store)+'</strong></td><td class="left-cell">'+escapeHtml(r.area)+"</td>"+
+    "<td>"+(r.full>0?fmtCur(r.full):"—")+"</td><td>"+fmtCur(r.mtd)+"</td><td>"+pct(r.achToDate)+"</td><td>"+fmtCur(r.proj)+"</td>"+
+    '<td class="'+(r.projPct==null?"":r.projPct>=1?"pct-up":"pct-down")+'">'+meter(r.projPct)+pct(r.projPct)+"</td><td>"+(r.gap==null?"—":(r.gap>=0?"+":"")+fmtCur(r.gap))+"</td>"+
+    "<td>"+fmtCur(r.avgDay)+"</td><td"+(r.needDay!=null&&r.avgDay>0&&r.needDay>r.avgDay*1.15?' class="cell-negative"':"")+">"+(r.needDay==null?"—":fmtCur(r.needDay))+"</td><td>"+r.remOpen+'</td><td class="left-cell">'+statusPill(r.status)+"</td></tr>"}).join(""):
+    '<tr><td colspan="12" class="modal-empty">No stores with this status.</td></tr>';
+}
+document.getElementById("paceStoreBody").addEventListener("click",function(e){var tr=e.target.closest("tr[data-pace-code]");tr&&window.openStoreDayModal&&window.openStoreDayModal(tr.dataset.paceCode,tr.dataset.paceArea)});
+document.getElementById("paceMgrExcel").addEventListener("click",function(){exportTable.call(this,document.getElementById("paceMgrTable"),"Target Pace - Managers","Target_Pace_Managers")});
+document.getElementById("paceStoreExcel").addEventListener("click",function(){exportTable.call(this,document.getElementById("paceStoreTable"),"Target Pace - Stores","Target_Pace_Stores")});
+
+/* =====================================================================
+   2. SAME-WEEKDAY COMPARISON (on the YoY Compare tab)
+   ===================================================================== */
+var yoySec=document.getElementById("tabYoy"),swChart=null,swPick=null;
+var swWrap=document.createElement("div");
+swWrap.innerHTML=
+ '<div class="panel" id="swPanel"><div class="panel-title" style="flex-wrap:wrap;"><i class="fas fa-calendar-week"></i> Same-weekday comparison'+
+ '<div class="sw-tools"><select class="cmp-select" id="swMonth" aria-label="Month"></select>'+
+ '<button type="button" class="toggle-btn" id="swEventsBtn" title="Edit the event list"><i class="fas fa-calendar-plus"></i> Events</button>'+
+ '<button type="button" class="export-btn excel" id="swExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div>'+
+ '<div class="pace-kpis" id="swCards"></div><div class="pace-note" id="swNote" style="margin-bottom:12px;"></div>'+
+ '<div class="chart-container" style="height:320px;"><canvas id="swChart"></canvas></div>'+
+ '<div class="sw-legend"><span><i class="sq" style="background:'+EV_COLOR.ramadan+';border:1px solid '+EV_SOLID.ramadan+'"></i>Ramadan</span><span><i class="sq" style="background:'+EV_COLOR.eid+';border:1px solid '+EV_SOLID.eid+'"></i>Eid / Arafat</span><span><i class="sq" style="background:'+EV_COLOR.national+';border:1px solid '+EV_SOLID.national+'"></i>National / Founding Day</span><span><i class="sq" style="background:'+EV_COLOR.other+';border:1px solid '+EV_SOLID.other+'"></i>Other</span><span>Shading = this year · strip at the bottom = the matching day last year</span></div></div>'+
+ '<div class="table-container"><div class="table-header-bar"><h3><i class="fas fa-table"></i> Day by day: same weekday vs same date</h3></div>'+
+ '<div class="table-scroll" style="max-height:520px;"><table id="swTable"><thead>'+
+ '<tr><th colspan="2" class="left-cell">&nbsp;</th><th colspan="2" class="group-2026" id="swHeadTY">This year</th><th colspan="4" class="group-2025">Same weekday last year (364 days back)</th><th colspan="3" class="group-prev">Same date last year</th></tr>'+
+ '<tr><th class="left-cell">Date</th><th class="left-cell">Events</th><th class="group-2026">Sales</th><th class="group-2026">ADT</th><th class="group-2025">Date</th><th class="group-2025">Sales</th><th class="group-2025">Change</th><th class="group-2025 left-cell">Events</th><th class="group-prev">Sales</th><th class="group-prev">Change</th><th class="group-prev left-cell">Events</th></tr>'+
+ '</thead><tbody id="swBody"></tbody></table></div></div>';
+yoySec&&yoySec.appendChild(swWrap);
+document.getElementById("swEventsBtn").addEventListener("click",openEvents);
+document.getElementById("swMonth").addEventListener("change",function(){swPick=this.value;renderSW()});
+document.getElementById("swExcel").addEventListener("click",function(){exportTable.call(this,document.getElementById("swTable"),"Same-weekday","Same_Weekday_Comparison")});
+
+function renderSW(){
+  if(!onTab("tabYoy")||!yoySec)return;
+  var raw=window.__rawData||[],c=ctx(),sel=document.getElementById("swMonth");
+  if(!raw.length||!c){document.getElementById("swCards").innerHTML="";document.getElementById("swBody").innerHTML="";return}
+  // months with sales in the current year
+  var ms=new Set();raw.forEach(function(r){r.year===c.curY&&r.month&&r.net>0&&ms.add(r.month)});
+  var opts=[...ms].sort(function(a,b){return a-b}).map(function(m){return c.curY+"-"+pad(m)});
+  var def=c.curY+"-"+pad(c.curM),val=swPick&&opts.includes(swPick)?swPick:opts.includes(def)?def:opts[opts.length-1];
+  sel.innerHTML=opts.map(function(o){return'<option value="'+o+'">'+MONTHS[+o.slice(5)-1]+" "+o.slice(0,4)+"</option>"}).join("");
+  if(!val){document.getElementById("swCards").innerHTML="";document.getElementById("swBody").innerHTML="";document.getElementById("swNote").textContent="No sales this year.";return}
+  sel.value=val;var Y=+val.slice(0,4),M=+val.slice(5);
+  var asOf=0;raw.forEach(function(r){r.year===Y&&r.month===M&&r.day!=null&&r.net>0&&r.day>asOf&&(asOf=r.day)});
+  var first=dayNum(Y,M,1),last=dayNum(Y,M,asOf),idx=new Map(),lyLoaded=!1;
+  raw.forEach(function(r){var n=rowNum(r);if(n==null)return;
+    var inTY=n>=first&&n<=last,inAl=n>=first-364&&n<=last-364,inDt=r.year===Y-1&&r.month===M&&r.day<=asOf;
+    if(!(inTY||inAl||inDt))return;inTY||(lyLoaded=!0);if(!scopePass(r))return;
+    var x=idx.get(n);x||idx.set(n,x={net:0,cc:0});x.net+=r.net||0;x.cc+=r.orders||0});
+  var get=function(n){return idx.get(n)||{net:0,cc:0}};
+  var rows=[],T={ty:0,cc:0,al:0,dt:0},Dly=dim(Y-1,M);
+  for(var d=1;d<=asOf;d++){
+    var n=dayNum(Y,M,d),a=n-364,dt=d<=Dly?dayNum(Y-1,M,d):null,t=get(n),al=get(a),ds=dt!=null?get(dt):null;
+    T.ty+=t.net;T.cc+=t.cc;T.al+=al.net;ds&&(T.dt+=ds.net);
+    rows.push({n:n,a:a,dt:dt,ty:t.net,cc:t.cc,al:al.net,ds:ds?ds.net:null});
+  }
+  var gA=growth(T.ty,T.al),gD=growth(T.ty,T.dt);
+  document.getElementById("swHeadTY").textContent=MONTHS[M-1]+" "+Y;
+  var evTY=eventsBetween(first,last),evLY=eventsBetween(first-364,last-364);
+  document.getElementById("swCards").innerHTML=
+    kpi(MONTHS[M-1]+" "+Y+" sales",fmtCur(T.ty),"Days 1–"+asOf+(asOf<dim(Y,M)?" (month in progress)":""))+
+    kpi("Growth vs same weekday",sgn(gA),"vs "+shortDay(first-364)+" – "+shortDay(last-364)+" "+fromNum(last-364).y,gA==null?"":gA>=0?"good":"bad")+
+    kpi("Growth vs same date",sgn(gD),"vs "+MONTHS[M-1]+" 1–"+Math.min(asOf,Dly)+" "+(Y-1),gD==null?"":gD>=0?"good":"bad")+
+    kpi("Calendar effect",gA!=null&&gD!=null?((gA-gD)*100>=0?"+":"")+((gA-gD)*100).toFixed(1)+" pts":"—","same-weekday minus same-date growth");
+  var note=[];
+  !lyLoaded&&note.push("<b>No last-year rows are loaded for these dates yet.</b> The full history loads in the background; this panel updates when it arrives.");
+  note.push("Comparing with the same weekday (364 days back) lines up weekends, so a Friday is compared with a Friday. A big calendar effect means the same-date figures are mostly showing the weekday mix, not real change.");
+  evTY.length&&note.push("<b>This year:</b> "+evTY.map(function(e){return'<span class="ev-chip ev-'+evType(e.name)+'">'+escapeHtml(evRangeText(e,first,last))+"</span>"}).join(""));
+  evLY.length&&note.push("<b>Matching days last year:</b> "+evLY.map(function(e){return'<span class="ev-chip ev-'+evType(e.name)+'">'+escapeHtml(evRangeText(e,first-364,last-364))+"</span>"}).join(""));
+  document.getElementById("swNote").innerHTML=note.join("<br>");
+  var chg=function(a,b){var g=growth(a,b);return g==null?'<td class="cell-ratios">—</td>':'<td class="cell-ratios '+(g>=0?"pct-up":"pct-down")+'"><span class="chip">'+sgn(g)+"</span></td>"};
+  document.getElementById("swBody").innerHTML=rows.map(function(r){
+    return'<tr><td class="left-cell"><strong>'+DOW3[wdOf(r.n)]+" "+shortDay(r.n)+'</strong></td><td class="left-cell">'+evChips(eventsOn(r.n))+'</td><td class="cell-2026">'+fmtCur(r.ty)+'</td><td class="cell-2026">'+fmtNum(r.cc)+"</td>"+
+      '<td class="cell-2025">'+DOW3[wdOf(r.a)]+" "+labelDay(r.a)+'</td><td class="cell-2025">'+fmtCur(r.al)+"</td>"+chg(r.ty,r.al)+'<td class="left-cell">'+evChips(eventsOn(r.a))+"</td>"+
+      '<td class="cell-prev">'+(r.dt==null?"—":fmtCur(r.ds))+"</td>"+(r.dt==null?'<td class="cell-ratios">—</td>':chg(r.ty,r.ds))+'<td class="left-cell">'+(r.dt==null?"":(DOW3[wdOf(r.dt)]+" "+evChips(eventsOn(r.dt))))+"</td></tr>"}).join("")+
+    (rows.length?'<tr class="subtotal-row"><td class="left-cell">TOTAL</td><td></td><td>'+fmtCur(T.ty)+"</td><td>"+fmtNum(T.cc)+"</td><td></td><td>"+fmtCur(T.al)+"</td>"+chg(T.ty,T.al)+"<td></td><td>"+fmtCur(T.dt)+"</td>"+chg(T.ty,T.dt)+"<td></td></tr>":
+      '<tr><td colspan="11" class="modal-empty">No sales in this month.</td></tr>');
+  // chart with event shading
+  if(typeof Chart==="undefined")return;
+  swChart&&(swChart.destroy(),swChart=null);
+  var shade={id:"swEvents",beforeDatasetsDraw:function(ch){
+    var xs=ch.scales.x,ca=ch.chartArea;if(!xs||!ca)return;var cx=ch.ctx,w=rows.length?(ca.right-ca.left)/rows.length:0;cx.save();
+    rows.forEach(function(r,i){var x0=xs.getPixelForValue(i)-w/2;
+      eventsOn(r.n).forEach(function(e){cx.fillStyle=EV_COLOR[evType(e.name)];cx.fillRect(x0,ca.top,w,ca.bottom-ca.top)});
+      var ly=eventsOn(r.a);ly.length&&(cx.fillStyle=EV_SOLID[evType(ly[0].name)],cx.globalAlpha=.75,cx.fillRect(x0+1,ca.bottom-5,w-2,5),cx.globalAlpha=1)});
+    cx.restore()}};
+  swChart=new Chart(document.getElementById("swChart").getContext("2d"),{type:"bar",
+    data:{labels:rows.map(function(r){return DOW3[wdOf(r.n)].slice(0,2)+" "+fromNum(r.n).d}),datasets:[
+      {label:MONTHS[M-1]+" "+Y,data:rows.map(function(r){return r.ty}),backgroundColor:cssVar("--primary")||"#2f5bd8",borderRadius:4,order:2},
+      {label:"Same weekday last year",type:"line",data:rows.map(function(r){return r.al||null}),borderColor:"#64748b",backgroundColor:"#64748b",borderWidth:2,pointRadius:2,tension:.25,order:1},
+      {label:"Same date last year",type:"line",data:rows.map(function(r){return r.ds||null}),borderColor:"#f59e0b",backgroundColor:"#f59e0b",borderDash:[5,4],borderWidth:1.6,pointRadius:0,tension:.25,order:1}]},
+    options:{responsive:!0,maintainAspectRatio:!1,interaction:{mode:"index",intersect:!1},
+      plugins:{legend:{position:"top",labels:{boxWidth:8,boxHeight:8,padding:14,font:{size:11,weight:"600"}}},
+        tooltip:{callbacks:{title:function(i){var r=rows[i[0].dataIndex];return DOW3[wdOf(r.n)]+" "+labelDay(r.n)},
+          label:function(i){return i.dataset.label+": "+(i.raw==null?"—":fmtCur(i.raw))},
+          footer:function(i){var r=rows[i[0].dataIndex],a=eventsOn(r.n).map(function(e){return e.name}),b=eventsOn(r.a).map(function(e){return e.name});
+            return(a.length?"This year: "+a.join(", "):"")+(a.length&&b.length?"\n":"")+(b.length?"Last year ("+shortDay(r.a)+"): "+b.join(", "):"")}}}},
+      scales:{x:{grid:{display:!1}},y:{beginAtZero:!0,ticks:{callback:function(v){return fmtNum(v)}}}}},plugins:[shade]});
+}
+
+/* =====================================================================
+   3. MANAGER REPORT CARD (PDF)
+   ===================================================================== */
+var mrModal=document.createElement("div");mrModal.className="modal-overlay";mrModal.id="mgrReportModal";
+mrModal.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" aria-label="Manager report" style="max-width:460px;">'+
+ '<div class="dialog-body"><h3><i class="fas fa-id-card"></i> Manager report card</h3>'+
+ '<p>A one-page PDF for each area manager: sales to date, target pace, growth on both a same-date and same-weekday basis, wastage, and every store with its status. It covers all of the manager\'s stores, whatever filters are on.</p>'+
+ '<label for="mrManager">Manager</label><select id="mrManager"></select>'+
+ '<label for="mrMonth">Month</label><select id="mrMonth"></select>'+
+ '<div class="dialog-error" id="mrErr"></div></div>'+
+ '<div class="dialog-actions"><button class="btn btn-outline" type="button" id="mrCancel">Cancel</button><button class="btn btn-primary" type="button" id="mrGo"><i class="fas fa-file-pdf"></i> Download PDF</button></div></div>';
+document.body.appendChild(mrModal);
+function closeMr(){mrModal.classList.remove("open")}
+document.getElementById("mrCancel").addEventListener("click",closeMr);
+mrModal.addEventListener("click",function(e){e.target===mrModal&&closeMr()});
+function openMr(){
+  var raw=window.__rawData||[];if(!raw.length)return void showToast("Load sales data first","info");
+  var mgrs=[...new Set(raw.map(function(r){return r.area}).filter(function(a){return a&&!/^(closed|unknown)$/i.test(a)}))].sort();
+  var selA=typeof narrowedSelection==="function"?narrowedSelection("area"):null,pre=selA&&selA.size===1?[...selA][0]:"__all";
+  document.getElementById("mrManager").innerHTML='<option value="__all">All managers (one page each)</option>'+mgrs.map(function(m){return'<option value="'+escapeAttr(m)+'">'+escapeHtml(m)+"</option>"}).join("");
+  document.getElementById("mrManager").value=mgrs.includes(pre)?pre:"__all";
+  var c=ctx(),ym=new Set();raw.forEach(function(r){r.year&&r.month&&r.net>0&&ym.add(r.year+"-"+pad(r.month))});
+  var list=[...ym].sort().reverse().slice(0,18);
+  document.getElementById("mrMonth").innerHTML=list.map(function(o){return'<option value="'+o+'">'+MONTHS[+o.slice(5)-1]+" "+o.slice(0,4)+"</option>"}).join("");
+  c&&list.includes(c.curY+"-"+pad(c.curM))&&(document.getElementById("mrMonth").value=c.curY+"-"+pad(c.curM));
+  document.getElementById("mrErr").textContent="";mrModal.classList.add("open");
+}
+document.getElementById("paceReportBtn").addEventListener("click",openMr);
+var calcBtn=document.getElementById("calcBtn");
+if(calcBtn){var tb=document.createElement("button");tb.className="tool-item";tb.id="mgrReportBtn";tb.setAttribute("role","menuitem");
+  tb.innerHTML='<i class="fas fa-id-card"></i><span>Manager report</span>';calcBtn.after(tb);tb.addEventListener("click",openMr)}
+
+// all figures for one month, every manager (no dashboard filters)
+function reportData(Y,M){
+  var P=paceCompute(function(){return!0},Y,M);if(!P||!P.asOf)return null;
+  var raw=window.__rawData||[],first=dayNum(Y,M,1),last=dayNum(Y,M,P.asOf),lyDate=new Map(),lyWk=new Map(),cc=new Map(),hasLY=!1;
+  raw.forEach(function(r){var n=rowNum(r);if(n==null)return;
+    r.year===Y-1&&r.month===M&&r.day<=P.asOf&&(lyDate.set(r.storeCode,(lyDate.get(r.storeCode)||0)+(r.net||0)),hasLY=!0);
+    n>=first-364&&n<=last-364&&lyWk.set(r.storeCode,(lyWk.get(r.storeCode)||0)+(r.net||0));
+    r.year===Y&&r.month===M&&r.day<=P.asOf&&cc.set(r.storeCode+"||"+r.area,(cc.get(r.storeCode+"||"+r.area)||0)+(r.orders||0))});
+  var w=window.__wastageData||[],waste=new Map(),hasW=!1;
+  w.forEach(function(x){if(x.year===Y&&x.month===M){hasW=!0;x.day<=P.asOf&&waste.set(String(x.storeCode),(waste.get(String(x.storeCode))||0)+(x.wastageCost||0))}});
+  P.rows.forEach(function(r){r.ly=lyDate.get(r.storeCode)||0;r.lyWk=lyWk.get(r.storeCode)||0;r.cc=cc.get(r.key)||0;r.waste=hasW?waste.get(String(r.storeCode))||0:null});
+  var mg=groupPace(P,function(r){return r.area||"UNASSIGNED"});
+  var ranked=mg.filter(function(x){return x.projPct!=null}).sort(function(a,b){return b.projPct-a.projPct});
+  return{P:P,mg:mg,ranked:ranked,hasW:hasW,hasLY:hasLY};
+}
+function cleanTxt(s){return String(s==null?"":s).replace(/[–—•·]/g,"-").replace(/\s+/g," ").trim()}
+function drawManagerPage(doc,R,name){
+  var P=R.P,rows=P.rows.filter(function(r){return(r.area||"UNASSIGNED")===name}),g=R.mg.find(function(x){return x.name===name})||{};
+  var W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),th=EXPORT_THEME,rgb=hexRgb;
+  var S={mtd:0,ly:0,lyWk:0,cc:0,waste:0};rows.forEach(function(r){S.mtd+=r.mtd;S.ly+=r.ly;S.lyWk+=r.lyWk;S.cc+=r.cc;r.waste!=null&&(S.waste+=r.waste)});
+  var rank=R.ranked.findIndex(function(x){return x.name===name}),monthTxt=MONTHS[P.M-1]+" "+P.Y,done=P.asOf>=P.D;
+  // header band
+  doc.setFillColor.apply(doc,rgb("2F5BD8"));doc.rect(0,0,W,26,"F");
+  doc.setTextColor(255,255,255);doc.setFont("helvetica","normal");doc.setFontSize(9);doc.text("MANAGER REPORT CARD",12,9);
+  doc.setFont("helvetica","bold");doc.setFontSize(17);doc.text(cleanTxt(name),12,19);
+  doc.setFont("helvetica","normal");doc.setFontSize(9);doc.text(monthTxt+"  -  data up to "+cleanTxt(labelDay(dayNum(P.Y,P.M,P.asOf))),W-12,11,{align:"right"});
+  doc.text(rows.length+" store"+(rows.length===1?"":"s")+(rank>=0?"  -  rank "+(rank+1)+" of "+R.ranked.length+" managers by projected %":""),W-12,18,{align:"right"});
+  // KPI boxes
+  var gD=growth(S.mtd,S.ly),gW=growth(S.mtd,S.lyWk),wp=R.hasW&&S.mtd>0?S.waste/S.mtd:null;
+  var boxes=[
+    ["Sales to date",fmtCur(S.mtd),"Days 1-"+P.asOf,null],
+    ["Target (month)",g.full>0?fmtCur(g.full):"-",g.none?g.none+" without target":"",null],
+    ["Achieved to date",pct(g.achToDate),"vs target for days so far",g.achToDate],
+    [done?"Month-end actual":"Projected month-end",fmtCur(g.proj||0),g.projPct!=null?pct(g.projPct)+" of target":"",g.projPct],
+    ["Growth, same dates",sgn(gD),R.hasLY?"vs "+MONTHS[P.M-1]+" "+(P.Y-1):"no last-year data",gD==null?null:gD>=0?1:0],
+    ["Growth, same weekday",sgn(gW),"364 days back",gW==null?null:gW>=0?1:0],
+    ["Needed per day",g.needDay==null?"-":fmtCur(g.needDay),"now "+fmtCur(g.avgDay||0)+" per day",g.needDay==null?null:g.needDay<=g.avgDay?1:0],
+    ["Wastage % of sales",wp==null?"-":(wp*100).toFixed(2)+"%",R.hasW?fmtCur(S.waste)+" wastage":"wastage not loaded for this month",wp==null?null:wp>.05?0:wp>.02?.95:1]];
+  var bw=(W-24-9)/4,bh=21;
+  boxes.forEach(function(b,i){var x=12+(i%4)*(bw+3),y=32+Math.floor(i/4)*(bh+3);
+    doc.setFillColor(246,247,249);doc.setDrawColor.apply(doc,rgb(th.border));doc.roundedRect(x,y,bw,bh,2,2,"FD");
+    doc.setFont("helvetica","normal");doc.setFontSize(7.5);doc.setTextColor.apply(doc,rgb(th.headText));doc.text(b[0],x+3,y+5.5);
+    var col=b[3]==null?th.text:b[3]>=1?th.positive:b[3]>=.9?"B76A00":th.negative;
+    doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor.apply(doc,rgb(col));doc.text(cleanTxt(b[1]),x+3,y+13);
+    doc.setFont("helvetica","normal");doc.setFontSize(6.8);doc.setTextColor.apply(doc,rgb(th.headText));doc.text(cleanTxt(b[2]).slice(0,48),x+3,y+18);
+  });
+  // highlights
+  var y=32+2*(bh+3)+5,withLY=rows.filter(function(r){return r.ly>0&&r.mtd>0}).map(function(r){return{n:r.store,g:r.mtd/r.ly-1}}).sort(function(a,b){return b.g-a.g});
+  var lines=[];
+  withLY.length&&lines.push("Best growth: "+withLY.slice(0,3).map(function(x){return cleanTxt(x.n)+" ("+sgn(x.g)+")"}).join(", "));
+  withLY.length>3&&lines.push("Weakest growth: "+withLY.slice(-3).reverse().map(function(x){return cleanTxt(x.n)+" ("+sgn(x.g)+")"}).join(", "));
+  lines.push("Status: "+(g.on||0)+" on track, "+(g.risk||0)+" at risk, "+(g.off||0)+" off track"+(g.none?", "+g.none+" without a target":"")+".");
+  var ev=eventsBetween(dayNum(P.Y,P.M,1),dayNum(P.Y,P.M,P.D));ev.length&&lines.push("Events this month: "+ev.map(function(e){return cleanTxt(evRangeText(e,dayNum(P.Y,P.M,1),dayNum(P.Y,P.M,P.D)))}).join(", ")+".");
+  doc.setFont("helvetica","bold");doc.setFontSize(9.5);doc.setTextColor.apply(doc,rgb(th.text));doc.text("Highlights",12,y);
+  doc.setFont("helvetica","normal");doc.setFontSize(8);y+=5;
+  lines.forEach(function(l){doc.splitTextToSize(l,W-24).forEach(function(s){doc.text(s,12,y);y+=4.2})});
+  // store table
+  var body=rows.slice().sort(function(a,b){return b.mtd-a.mtd}).map(function(r){
+    return[cleanTxt(r.store),fmtCur(r.mtd),sgn(growth(r.mtd,r.ly)),sgn(growth(r.mtd,r.lyWk)),pct(r.achToDate),pct(r.projPct),r.needDay==null?"-":fmtCur(r.needDay),
+      r.waste==null||!(r.mtd>0)?"-":(r.waste/r.mtd*100).toFixed(2)+"%",STATUS_TEXT[r.status]].map(cleanTxt)});
+  doc.autoTable({startY:y+2,head:[["Store","Sales to date","Growth (dates)","Growth (weekday)","Achieved to date","Projected %","Needed / day","Wastage %","Status"]],body:body,
+    theme:"grid",margin:{left:12,right:12,bottom:14},
+    styles:{font:"helvetica",fontSize:7.4,cellPadding:1.5,textColor:rgb(th.text),lineColor:rgb(th.border),lineWidth:.1,halign:"right",valign:"middle"},
+    headStyles:{fillColor:rgb(th.headFill),textColor:rgb(th.headText),fontStyle:"bold",fontSize:6.8},
+    columnStyles:{0:{halign:"left",cellWidth:52},8:{halign:"center"}},
+    didParseCell:function(d){if(d.section!=="body")return;var t=String(d.cell.raw);
+      if((d.column.index===2||d.column.index===3)&&t.length>1){d.cell.styles.textColor=rgb(t.charAt(0)==="-"?th.negative:th.positive)}
+      if(d.column.index===8){var m={"On track":[th.positive,"E3F3EA"],"At risk":["B76A00","FBF0D9"],"Off track":[th.negative,"FBE6E4"]}[t];
+        m&&(d.cell.styles.textColor=rgb(m[0]),d.cell.styles.fillColor=rgb(m[1]),d.cell.styles.fontStyle="bold")}}});
+  // footer
+  doc.setFont("helvetica","normal");doc.setFontSize(6.8);doc.setTextColor.apply(doc,rgb(th.headText));
+  doc.text("Projection: sales so far + each store's average for that weekday over the last 4 weeks, for the open days left. Growth (weekday) compares with the same weekday 364 days back.",12,H-8);
+  doc.text("Sales Intelligence - generated "+cleanTxt(new Date().toLocaleString()),W-12,H-4,{align:"right"});
+}
+document.getElementById("mrGo").addEventListener("click",function(){
+  if(!tablePdfReady())return;
+  var who=document.getElementById("mrManager").value,ym=document.getElementById("mrMonth").value;if(!ym)return;
+  var Y=+ym.slice(0,4),M=+ym.slice(5),btn=this;
+  guardBusy(btn,"Building report…",function(){
+    var R=reportData(Y,M);if(!R)return void(document.getElementById("mrErr").textContent="No sales for this month.");
+    var names=who==="__all"?R.mg.map(function(x){return x.name}).sort():[who];
+    names=names.filter(function(n){return R.P.rows.some(function(r){return(r.area||"UNASSIGNED")===n})});
+    if(!names.length)return void(document.getElementById("mrErr").textContent="This manager has no sales in "+MONTHS[M-1]+" "+Y+".");
+    var all=names.join(" ")+R.P.rows.map(function(r){return r.store}).join(" ");/[^\u0000-ÿ]/.test(all)&&showToast("Some non-Latin text may not display correctly in the PDF","info");
+    var doc=new window.jspdf.jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+    names.forEach(function(n,i){i&&doc.addPage();drawManagerPage(doc,R,n)});
+    var tag=who==="__all"?"All_Managers":who.replace(/[^a-z0-9]+/gi,"_");
+    doc.save("Manager_Report_"+tag+"_"+MONTHS[M-1]+"_"+Y+".pdf");closeMr();
+    showToast("Report downloaded ("+names.length+" page"+(names.length===1?"":"s")+")","success");addNotif&&addNotif("Manager report: "+(who==="__all"?"all managers":who));
+  });
+});
+
+/* ---------- wiring ---------- */
+window.__dashEvents={between:eventsBetween,on:eventsOn,type:evType,rangeText:evRangeText,open:openEvents};
+window.__paceCompute=paceCompute;
+function refreshAll(){renderPace();renderSW()}
+// tell other pages when the event list changes
+new MutationObserver(function(){evModal.classList.contains("open")||document.dispatchEvent(new CustomEvent("dashboard:events-changed"))}).observe(evModal,{attributes:!0,attributeFilter:["class"]});
+document.addEventListener("dashboard:filtered",function(){refreshAll()});
+// render when a page becomes visible (sidebar, Quick find, etc.)
+[paceSec,yoySec].forEach(function(s){s&&new MutationObserver(function(){s.classList.contains("active")&&setTimeout(refreshAll,0)}).observe(s,{attributes:!0,attributeFilter:["class"]})});
+}();</script>
+
+<!-- =====================================================================
+     ADD-ON v7.2 (new code only): Pace vs Last Year
+     Month-end projection built from last year's pattern instead of the target:
+     sales so far + last year's sales on the matching weekdays still to come x this year's growth so far.
+     ===================================================================== -->
+<style>
+#lypKpis{grid-template-columns:repeat(4,minmax(0,1fr))}@media (max-width:900px){#lypKpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.lyp-basis{display:inline-block;padding:1px 7px;border-radius:999px;font-size:.66rem;font-weight:600;background:var(--border);color:var(--text-muted);white-space:nowrap}
+</style>
+<script>!function(){
+"use strict";
+if(typeof FilterState==="undefined"||typeof TAB_META==="undefined"||typeof switchTab!=="function")return;
+var pad=function(n){return String(n).padStart(2,"0")};
+var dayNum=function(y,m,d){return Math.round(Date.UTC(y,m-1,d)/864e5)};
+var wdOf=function(n){return((n%7)+7+4)%7};
+var fromNum=function(n){var t=new Date(n*864e5);return{y:t.getUTCFullYear(),m:t.getUTCMonth()+1,d:t.getUTCDate()}};
+var dim=function(y,m){return new Date(y,m,0).getDate()};
+var labelDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]+" "+p.y};
+var shortDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]};
+var DOW3=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+var pct=function(v){return v==null||!isFinite(v)?"—":(v*100).toFixed(1)+"%"};
+var sgn=function(v){return v==null||!isFinite(v)?"—":(v>=0?"+":"")+(v*100).toFixed(1)+"%"};
+var closedOn=function(code,wd){return typeof WEEKEND_CLOSED!=="undefined"&&WEEKEND_CLOSED.has(String(code).trim())&&(wd===5||wd===6)};
+var rowNum=function(r){return r.year&&r.month&&r.day!=null?dayNum(r.year,r.month,r.day):null};
+function onTab(id){var s=document.getElementById(id);return!!(s&&s.classList.contains("active"))}
+function ctx(){return window.__getMonthContext?window.__getMonthContext():null}
+function targetMaps(){return window.__dbTargetMaps||window.__targetMaps||null}
+function scopePass(r){
+  var ns=function(k){return typeof narrowedSelection==="function"&&FilterState[k]&&FilterState[k].options.length?narrowedSelection(k):null};
+  var st=ns("store"),ar=ns("area"),sg=ns("segment"),fm=ns("format");
+  if(st&&!st.has(r.storeCode))return!1;if(ar&&!ar.has(r.area))return!1;
+  if(sg&&!sg.has(r.segment))return!1;if(fm&&!fm.has(r.format))return!1;
+  var q=typeof globalSearchTerm!=="undefined"?globalSearchTerm:"";
+  return!q||(r.store+" "+r.storeCode+" "+r.area).toLowerCase().includes(q);
+}
+function storeName(r){var s=String(r.store||"");return s.startsWith(String(r.storeCode))?s:r.storeCode+" - "+s}
+var EV=function(){return window.__dashEvents||null};
+function evChipsRange(a,b){var E=EV();if(!E)return"";return E.between(a,b).map(function(e){return'<span class="ev-chip ev-'+E.type(e.name)+'">'+escapeHtml(E.rangeText(e,a,b))+"</span>"}).join("")}
+
+/* ---------- calculation ---------- */
+// Per store: growth so far = sales to date / last year's sales on the matching weekdays (364 days back).
+// Projection = sales to date + last year's matching remaining days x that growth.
+// Stores without a usable last-year history fall back to their run rate (average per sales day x open days left).
+function lyCompute(scopeFn,Y,M){
+  var raw=window.__rawData||[];if(!raw.length)return null;
+  var asOf=0;raw.forEach(function(r){r.year===Y&&r.month===M&&r.day!=null&&r.net>0&&r.day>asOf&&(asOf=r.day)});
+  if(!asOf)return{Y:Y,M:M,asOf:0,rows:[]};
+  var D=dim(Y,M),first=dayNum(Y,M,1),cut=dayNum(Y,M,asOf),lastN=dayNum(Y,M,D),stores=new Map();
+  // 1) this year, in the dashboard's scope
+  raw.forEach(function(r){
+    if(!(r.year===Y&&r.month===M&&r.day!=null&&r.day<=asOf)||!scopeFn(r))return;
+    var k=r.storeCode+"||"+r.area,s=stores.get(k);
+    s||stores.set(k,s={key:k,store:storeName(r),storeCode:String(r.storeCode),area:r.area,mtd:0,sold:new Set,lyTo:0,lyRest:0,lyMonth:0,lyDays:new Set,lyRestDay:new Map});
+    s.mtd+=r.net||0;r.net>0&&s.sold.add(r.day);
+  });
+  // last-year rows go to the store's main row (by store code), whatever manager they had last year
+  var primary=new Map();stores.forEach(function(s){var p=primary.get(s.storeCode);(!p||s.mtd>p.mtd)&&primary.set(s.storeCode,s)});
+  var lyDaily=new Map(),lyLoaded=!1;
+  raw.forEach(function(r){
+    var n=rowNum(r);if(n==null)return;var a=n+364,inAl=a>=first&&a<=lastN,inCal=r.year===Y-1&&r.month===M;
+    if(!(inAl||inCal))return;lyLoaded=!0;var s=primary.get(String(r.storeCode));if(!s)return;var v=r.net||0;
+    inCal&&(s.lyMonth+=v);
+    if(inAl){lyDaily.set(a,(lyDaily.get(a)||0)+v);
+      if(a<=cut){s.lyTo+=v;v>0&&s.lyDays.add(a)}else{s.lyRest+=v;s.lyRestDay.set(a,(s.lyRestDay.get(a)||0)+v)}}
+  });
+  var tm=targetMaps(),rows=[],projDaily=new Map();
+  stores.forEach(function(s){
+    var remOpen=0;for(var d=asOf+1;d<=D;d++)closedOn(s.storeCode,wdOf(dayNum(Y,M,d)))||remOpen++;
+    // last year counts as a basis only if the store traded on at least half of this year's sales days
+    var basis=s.lyTo>0&&s.lyDays.size>=Math.max(1,Math.ceil(s.sold.size*.5))?"ly":"run";
+    var g=basis==="ly"?s.mtd/s.lyTo:null,proj,avg=s.sold.size?s.mtd/s.sold.size:0;
+    if(basis==="ly"){proj=s.mtd+s.lyRest*g;s.lyRestDay.forEach(function(v,n){projDaily.set(n,(projDaily.get(n)||0)+v*g)})}
+    else{proj=s.mtd;for(var d2=asOf+1;d2<=D;d2++){var n2=dayNum(Y,M,d2);if(closedOn(s.storeCode,wdOf(n2)))continue;proj+=avg;projDaily.set(n2,(projDaily.get(n2)||0)+avg)}}
+    var full=0;if(tm){var t=function(y){return tm.exact.get(s.storeCode+"||"+s.area+"||"+y+"||"+M)||tm.byCodeYearMonth.get(s.storeCode+"||"+y+"||"+M)||0};full=t(Y)||t(Y-1)}
+    var vsLY=s.lyMonth>0?proj/s.lyMonth-1:null;
+    rows.push({key:s.key,store:s.store,storeCode:s.storeCode,area:s.area,mtd:s.mtd,lyTo:s.lyTo,lyRest:s.lyRest,lyMonth:s.lyMonth,growth:g==null?null:g-1,
+      proj:proj,vsLY:vsLY,full:full,vsTgt:full>0?proj/full:null,basis:basis,remOpen:remOpen,avg:avg,
+      needLY:s.lyMonth>0?(remOpen>0?Math.max(0,s.lyMonth-s.mtd)/remOpen:0):null,status:lyStatus(vsLY)});
+  });
+  rows.sort(function(a,b){return(a.vsLY==null)-(b.vsLY==null)||(a.vsLY||0)-(b.vsLY||0)});
+  return{Y:Y,M:M,asOf:asOf,D:D,first:first,cut:cut,lastN:lastN,rows:rows,lyDaily:lyDaily,projDaily:projDaily,lyLoaded:lyLoaded};
+}
+function lyStatus(v){return v==null?"none":v>=0?"on":v>=-.05?"risk":"off"}
+var LY_TEXT={on:"Growing",risk:"Slightly down",off:"Declining",none:"No last year"};
+function pill(s){return'<span class="pace-status '+s+'">'+LY_TEXT[s]+"</span>"}
+function meterG(v){if(v==null)return"";var c=v>=0?"var(--success)":v>=-.05?"var(--warning)":"var(--danger)";
+  return'<span class="pace-meter"><span style="width:'+Math.min(100,Math.max(4,50+v*250)).toFixed(0)+"%;background:"+c+'"></span></span>'}
+function sum(list,f){return list.reduce(function(a,r){return a+(r[f]||0)},0)}
+function groupRows(L,keyFn){
+  var g=new Map();L.rows.forEach(function(r){var k=keyFn(r);g.has(k)||g.set(k,[]);g.get(k).push(r)});
+  var rem=L.D-L.asOf;
+  return[...g.entries()].map(function(e){var rs=e[1],o={name:e[0],stores:rs.length,mtd:sum(rs,"mtd"),proj:sum(rs,"proj"),lyMonth:sum(rs,"lyMonth"),full:sum(rs,"full")};
+    var b=rs.filter(function(r){return r.basis==="ly"}),bm=sum(b,"mtd"),bl=sum(b,"lyTo");
+    o.growth=bl>0?bm/bl-1:null;o.vsLY=o.lyMonth>0?o.proj/o.lyMonth-1:null;o.vsTgt=o.full>0?o.proj/o.full:null;
+    o.avg=L.asOf?o.mtd/L.asOf:0;o.needLY=o.lyMonth>0?(rem>0?Math.max(0,o.lyMonth-o.mtd)/rem:0):null;
+    o.down=rs.filter(function(r){return r.status==="off"||r.status==="risk"}).length;o.status=lyStatus(o.vsLY);return o});
+}
+
+/* ---------- page ---------- */
+TAB_META.lypace={section:"tabLyPace",title:"Pace vs Last Year",sub:"Month-end projection from last year's pattern, scaled by this year's growth so far."};
+var sec=document.createElement("div");sec.className="view-section";sec.id="tabLyPace";
+var TH='<th>Sales to date</th><th>Last year, same weekdays</th><th>Growth so far</th><th>Projected month-end</th><th>Last year, full month</th><th>Projected vs last year</th><th>Projected vs target</th><th>Avg / day so far</th><th>Needed / day to beat last year</th>';
+sec.innerHTML=
+ '<div class="panel"><div class="panel-title"><i class="fas fa-clock-rotate-left"></i> <span id="lypTitle">Pace vs last year</span><span class="right" id="lypAsOf"></span></div>'+
+ '<div class="pace-kpis" id="lypKpis"></div><div class="pace-note" id="lypNote"></div>'+
+ '<div class="chart-container" style="height:300px;margin-top:14px;"><canvas id="lypChart"></canvas></div></div>'+
+ '<div class="table-container"><div class="table-header-bar"><h3><i class="fas fa-user-tie"></i> By manager</h3><div class="table-controls">'+
+   '<button type="button" class="export-btn excel" id="lypMgrExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div>'+
+   '<div class="table-scroll" style="max-height:420px;"><table id="lypMgrTable"><thead><tr><th class="left-cell">Manager</th><th>Stores</th>'+TH+'<th class="left-cell">Stores down</th></tr></thead><tbody id="lypMgrBody"></tbody></table></div></div>'+
+ '<div class="table-container"><div class="table-header-bar"><h3><i class="fas fa-store"></i> By store</h3><div class="table-controls">'+
+   '<div class="segmented" id="lypFilter"><button type="button" class="seg-btn active" data-lf="all">All</button><button type="button" class="seg-btn" data-lf="off">Declining</button><button type="button" class="seg-btn" data-lf="risk">Slightly down</button><button type="button" class="seg-btn" data-lf="on">Growing</button><button type="button" class="seg-btn" data-lf="none">No last year</button></div>'+
+   '<button type="button" class="export-btn excel" id="lypStoreExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div>'+
+   '<div class="table-scroll"><table id="lypStoreTable"><thead><tr><th class="left-cell">Store</th><th class="left-cell">Manager</th>'+TH+'<th class="left-cell">Status</th></tr></thead><tbody id="lypStoreBody"></tbody></table></div></div>';
+var anchor=document.getElementById("tabPace")||document.getElementById("tabFormatAm");anchor?anchor.after(sec):document.querySelector(".dashboard").appendChild(sec);
+var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="lypace";nb.title="Pace vs Last Year";
+nb.innerHTML='<i class="fas fa-clock-rotate-left"></i><span class="nav-label">Pace vs Last Year</span>';
+var ab=document.querySelector('.tab-btn[data-tab="pace"]')||document.querySelector('.tab-btn[data-tab="formatam"]');ab?ab.after(nb):document.querySelector(".sidebar-nav").appendChild(nb);
+nb.addEventListener("click",function(){switchTab("lypace")});
+try{Object.assign(AR_TEXT,{"Pace vs Last Year":"الوتيرة مقارنة بالعام الماضي","Growing":"نمو","Slightly down":"انخفاض طفيف","Declining":"تراجع","No last year":"لا يوجد عام سابق"})}catch(e){}
+
+var filt="all",last=null,chart=null;
+document.getElementById("lypFilter").addEventListener("click",function(e){var b=e.target.closest("[data-lf]");if(!b)return;filt=b.dataset.lf;
+  this.querySelectorAll("[data-lf]").forEach(function(x){x.classList.toggle("active",x===b)});renderStores()});
+function kpi(k,v,s,cls){return'<div class="pace-kpi"><div class="k">'+k+'</div><div class="v '+(cls||"")+'">'+v+'</div><div class="s">'+(s||"&nbsp;")+"</div></div>"}
+var gcls=function(v){return v==null?"":v>=0?"good":v>=-.05?"warn":"bad"};
+var tcls=function(v){return v==null?"":v>=1?"good":v>=.9?"warn":"bad"};
+var cellG=function(v){return'<td class="'+(v==null?"":v>=0?"pct-up":"pct-down")+'">'+sgn(v)+"</td>"};
+function clear(msg){["lypKpis","lypMgrBody","lypStoreBody"].forEach(function(id){document.getElementById(id).innerHTML=""});
+  document.getElementById("lypAsOf").textContent="";document.getElementById("lypNote").textContent=msg;chart&&(chart.destroy(),chart=null)}
+function render(){
+  if(!onTab("tabLyPace"))return;
+  var c=ctx();if(!c||!(window.__rawData||[]).length)return clear("Load sales data to see the pace against last year.");
+  var L=last=lyCompute(scopePass,c.curY,c.curM);
+  document.getElementById("lypTitle").textContent="Pace vs last year · "+MONTHS[c.curM-1]+" "+c.curY;
+  if(!L||!L.asOf)return clear("No sales for "+MONTHS[c.curM-1]+" "+c.curY+" yet.");
+  var R=L.rows,T={mtd:sum(R,"mtd"),proj:sum(R,"proj"),lyMonth:sum(R,"lyMonth"),full:sum(R,"full")},B=R.filter(function(r){return r.basis==="ly"});
+  var bm=sum(B,"mtd"),bl=sum(B,"lyTo"),g=bl>0?bm/bl-1:null,vsLY=T.lyMonth>0?T.proj/T.lyMonth-1:null,vsT=T.full>0?T.proj/T.full:null;
+  var cnt={on:0,risk:0,off:0,none:0};R.forEach(function(r){cnt[r.status]++});
+  var done=L.asOf>=L.D,rem=L.D-L.asOf,need=T.lyMonth>0&&rem>0?Math.max(0,T.lyMonth-T.mtd)/rem:null,runN=R.length-B.length;
+  document.getElementById("lypAsOf").textContent="Data up to "+labelDay(L.cut)+(done?" · month complete":" · "+rem+" day"+(rem===1?"":"s")+" left");
+  document.getElementById("lypKpis").innerHTML=
+    kpi("Last year, full month",T.lyMonth>0?fmtCur(T.lyMonth):"—",MONTHS[L.M-1]+" "+(L.Y-1))+
+    kpi("Sales to date",fmtCur(T.mtd),"Days 1–"+L.asOf)+
+    kpi("Growth so far",sgn(g),"vs same weekdays last year",gcls(g))+
+    kpi(done?"Month-end actual":"Projected month-end",fmtCur(T.proj),runN?runN+" store"+(runN===1?"":"s")+" on run rate":"from last year's pattern")+
+    kpi("Projected vs last year",sgn(vsLY),T.lyMonth>0?(T.proj-T.lyMonth>=0?"+":"")+fmtCur(T.proj-T.lyMonth):"",gcls(vsLY))+
+    kpi("Projected vs target",pct(vsT),T.full>0?"target "+fmtCur(T.full):"no target",tcls(vsT))+
+    kpi("Per day to beat last year",need==null?"—":fmtCur(need),need==null?"":"now "+fmtCur(T.mtd/L.asOf)+" per day",need==null?"":need<=T.mtd/L.asOf?"good":"bad")+
+    kpi("Stores",'<span style="color:var(--success)">'+cnt.on+'</span> · <span style="color:var(--warning)">'+cnt.risk+'</span> · <span style="color:var(--danger)">'+cnt.off+"</span>","growing · slightly down · declining");
+  var a=L.cut+1,b=L.lastN,tyEv=done?"":evChipsRange(a,b),lyEv=done?"":evChipsRange(a-364,b-364),notes=[];
+  !L.lyLoaded&&notes.push("<b>Last year's rows are not loaded yet.</b> The full history loads in the background; this page updates when it arrives.");
+  notes.push(done?"The month is complete, so the projection equals actual sales.":
+    "<b>How the projection works:</b> each store's growth so far (sales to date against last year's sales on the same weekdays, 364 days back) is applied to last year's sales on the matching days still to come, then added to sales to date. "+
+    "This follows last year's shape for the rest of the month, including its busy and quiet days. Stores that did not trade on at least half of the matching days last year use their run rate instead (average per sales day × open days left).");
+  !done&&(tyEv||lyEv)&&notes.push("<b>Check the calendar:</b> days left this year "+(tyEv||"have no events")+" · matching days last year "+(lyEv||"had no events")+". If these differ, last year's pattern will over- or under-shoot those days.");
+  document.getElementById("lypNote").innerHTML=notes.join("<br>");
+  // managers
+  var mg=groupRows(L,function(r){return r.area||"UNASSIGNED"}).sort(function(x,y){return(x.vsLY==null)-(y.vsLY==null)||(x.vsLY||0)-(y.vsLY||0)});
+  var row=function(x,tot){return"<tr"+(tot?' class="subtotal-row"':"")+'><td class="left-cell"><strong>'+escapeHtml(x.name)+"</strong></td><td>"+x.stores+"</td><td>"+fmtCur(x.mtd)+"</td><td>"+(x.lyTo>0||x.growth!=null?fmtCur(x.lyTo||0):"—")+"</td>"+cellG(x.growth)+
+    "<td>"+fmtCur(x.proj)+"</td><td>"+(x.lyMonth>0?fmtCur(x.lyMonth):"—")+'</td><td class="'+(x.vsLY==null?"":x.vsLY>=0?"pct-up":"pct-down")+'">'+(tot?"":meterG(x.vsLY))+sgn(x.vsLY)+"</td>"+
+    '<td class="'+(x.vsTgt==null?"":x.vsTgt>=1?"pct-up":"pct-down")+'">'+pct(x.vsTgt)+"</td><td>"+fmtCur(x.avg)+"</td><td>"+(x.needLY==null?"—":fmtCur(x.needLY))+'</td><td class="left-cell">'+(tot?"":x.down)+"</td></tr>"};
+  mg.forEach(function(x){x.lyTo=sum(L.rows.filter(function(r){return(r.area||"UNASSIGNED")===x.name&&r.basis==="ly"}),"lyTo")});
+  var tot={name:"TOTAL",stores:R.length,mtd:T.mtd,lyTo:bl,growth:g,proj:T.proj,lyMonth:T.lyMonth,vsLY:vsLY,vsTgt:vsT,avg:T.mtd/L.asOf,needLY:need};
+  document.getElementById("lypMgrBody").innerHTML=mg.length?mg.map(function(x){return row(x)}).join("")+row(tot,!0):'<tr><td colspan="12" class="modal-empty">No stores in the current filters.</td></tr>';
+  renderStores();renderChart(L);
+}
+function renderStores(){
+  var L=last,body=document.getElementById("lypStoreBody");if(!L||!L.asOf){body.innerHTML="";return}
+  var list=L.rows.filter(function(r){return filt==="all"||r.status===filt});
+  body.innerHTML=list.length?list.map(function(r){
+    return'<tr class="store-clickable" data-lyp-code="'+escapeAttr(r.storeCode)+'" data-lyp-area="'+escapeAttr(r.area)+'" title="Click for day-wise detail"><td class="left-cell col-store"><strong>'+escapeHtml(r.store)+"</strong>"+(r.basis==="run"?' <span class="lyp-basis" title="Not enough last-year sales on the matching days, so the projection uses the run rate">run rate</span>':"")+'</td><td class="left-cell">'+escapeHtml(r.area)+"</td>"+
+      "<td>"+fmtCur(r.mtd)+"</td><td>"+(r.lyTo>0?fmtCur(r.lyTo):"—")+"</td>"+cellG(r.growth)+"<td>"+fmtCur(r.proj)+"</td><td>"+(r.lyMonth>0?fmtCur(r.lyMonth):"—")+"</td>"+
+      '<td class="'+(r.vsLY==null?"":r.vsLY>=0?"pct-up":"pct-down")+'">'+meterG(r.vsLY)+sgn(r.vsLY)+'</td><td class="'+(r.vsTgt==null?"":r.vsTgt>=1?"pct-up":"pct-down")+'">'+pct(r.vsTgt)+"</td>"+
+      "<td>"+fmtCur(r.avg)+"</td><td"+(r.needLY!=null&&r.avg>0&&r.needLY>r.avg*1.15?' class="cell-negative"':"")+">"+(r.needLY==null?"—":fmtCur(r.needLY))+'</td><td class="left-cell">'+pill(r.status)+"</td></tr>"}).join(""):
+    '<tr><td colspan="12" class="modal-empty">No stores with this status.</td></tr>';
+}
+function renderChart(L){
+  if(typeof Chart==="undefined")return;chart&&(chart.destroy(),chart=null);
+  var ty=new Map();(window.__rawData||[]).forEach(function(r){if(r.year===L.Y&&r.month===L.M&&r.day!=null&&r.day<=L.asOf&&scopePass(r)){var n=dayNum(L.Y,L.M,r.day);ty.set(n,(ty.get(n)||0)+(r.net||0))}});
+  var ns=[];for(var n=L.first;n<=L.lastN;n++)ns.push(n);
+  var E=EV(),shade={id:"lypEvents",beforeDatasetsDraw:function(ch){if(!E)return;var xs=ch.scales.x,ca=ch.chartArea;if(!xs||!ca)return;var cx=ch.ctx,w=(ca.right-ca.left)/ns.length;cx.save();
+    var col={ramadan:"rgba(124,58,237,.13)",eid:"rgba(22,163,74,.16)",national:"rgba(217,119,6,.18)",other:"rgba(47,91,216,.12)"};
+    ns.forEach(function(n,i){E.on(n).forEach(function(e){cx.fillStyle=col[E.type(e.name)];cx.fillRect(xs.getPixelForValue(i)-w/2,ca.top,w,ca.bottom-ca.top)})});
+    var x=xs.getPixelForValue(L.asOf-1)+w/2;cx.strokeStyle=cssVar("--text-light")||"#9aa1ad";cx.setLineDash([4,4]);cx.beginPath();cx.moveTo(x,ca.top);cx.lineTo(x,ca.bottom);cx.stroke();cx.restore()}};
+  chart=new Chart(document.getElementById("lypChart").getContext("2d"),{type:"bar",
+    data:{labels:ns.map(function(n){return DOW3[wdOf(n)].slice(0,2)+" "+fromNum(n).d}),datasets:[
+      {label:"Actual "+MONTHS[L.M-1]+" "+L.Y,data:ns.map(function(n){return n<=L.cut?ty.get(n)||0:null}),backgroundColor:cssVar("--primary")||"#2f5bd8",borderRadius:4,order:2},
+      {label:"Projected (last year × growth)",data:ns.map(function(n){return n>L.cut?Math.round(L.projDaily.get(n)||0):null}),backgroundColor:"rgba(91,91,214,.35)",borderColor:cssVar("--accent")||"#5b5bd6",borderWidth:1,borderRadius:4,order:2},
+      {label:"Last year, same weekday",type:"line",data:ns.map(function(n){return L.lyDaily.has(n)?L.lyDaily.get(n):null}),borderColor:"#64748b",backgroundColor:"#64748b",borderWidth:1.8,pointRadius:0,tension:.25,order:1}]},
+    options:{responsive:!0,maintainAspectRatio:!1,interaction:{mode:"index",intersect:!1},
+      plugins:{legend:{position:"top",labels:{boxWidth:8,boxHeight:8,padding:14,font:{size:11,weight:"600"}}},
+        tooltip:{filter:function(i){return i.raw!=null},callbacks:{title:function(i){var n=ns[i[0].dataIndex];return DOW3[wdOf(n)]+" "+labelDay(n)},label:function(i){return i.dataset.label+": "+fmtCur(i.raw)},
+          footer:function(i){if(!E)return"";var n=ns[i[0].dataIndex],a=E.on(n).map(function(e){return e.name}),b=E.on(n-364).map(function(e){return e.name});
+            return(a.length?"This year: "+a.join(", "):"")+(a.length&&b.length?"\n":"")+(b.length?"Last year ("+shortDay(n-364)+"): "+b.join(", "):"")}}}},
+      scales:{x:{stacked:!0,grid:{display:!1}},y:{stacked:!1,beginAtZero:!0,ticks:{callback:function(v){return fmtNum(v)}}}}},plugins:[shade]});
+}
+document.getElementById("lypStoreBody").addEventListener("click",function(e){var tr=e.target.closest("tr[data-lyp-code]");tr&&window.openStoreDayModal&&window.openStoreDayModal(tr.dataset.lypCode,tr.dataset.lypArea)});
+function xls(tableId,sheet,file){return function(){if(!librariesReady()||!window.__tableToAoa)return;var el=document.getElementById(tableId);
+  guardBusy(this,"Exporting…",async function(){var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(window.__tableToAoa(el,!0)),sheet);
+    await downloadWorkbook(wb,file+"_"+(new Date).toISOString().slice(0,10)+".xlsx");showToast("Excel exported","success")})}}
+document.getElementById("lypMgrExcel").addEventListener("click",xls("lypMgrTable","Pace vs LY - Managers","Pace_vs_LY_Managers"));
+document.getElementById("lypStoreExcel").addEventListener("click",xls("lypStoreTable","Pace vs LY - Stores","Pace_vs_LY_Stores"));
+document.addEventListener("dashboard:filtered",render);
+document.addEventListener("dashboard:events-changed",render);
+new MutationObserver(function(){sec.classList.contains("active")&&setTimeout(render,0)}).observe(sec,{attributes:!0,attributeFilter:["class"]});
+}();</script>
+
+<!-- =====================================================================
+     ADD-ON v7.3 (new code only): Smart alerts
+     Checks every store against its own normal pattern, as of the latest day with sales,
+     and lists only the stores that need attention.
+     ===================================================================== -->
+<style>
+#saKpis{grid-template-columns:repeat(4,minmax(0,1fr))}@media (max-width:720px){#saKpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sa-list{display:flex;flex-direction:column}
+.sa-item{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:flex-start;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.sa-item:last-child{border-bottom:none}.sa-item:hover{background:var(--surface-hover)}
+.sa-ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:.9rem}
+.sa-ic.high{background:var(--danger-light);color:var(--danger)}.sa-ic.medium{background:var(--warning-light);color:var(--warning)}.sa-ic.info{background:var(--primary-light);color:var(--primary)}
+.sa-t{font-size:.88rem;font-weight:600;color:var(--text-main)}.sa-d{font-size:.8rem;color:var(--text-muted);margin-top:2px;line-height:1.5}.sa-m{font-size:.72rem;color:var(--text-light);margin-top:3px}
+.sa-sev{font-size:.68rem;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.sa-sev.high{background:var(--danger-light);color:var(--danger)}.sa-sev.medium{background:var(--warning-light);color:var(--warning)}.sa-sev.info{background:var(--primary-light);color:var(--primary)}
+.sa-chips{display:flex;gap:6px;flex-wrap:wrap}
+.sa-chip{border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);font-size:.76rem;font-weight:600;padding:5px 11px;border-radius:8px;cursor:pointer}
+.sa-chip.active{background:var(--primary-light);color:var(--primary);border-color:var(--primary)}
+.sa-chip .n{margin-inline-start:5px;opacity:.75}
+</style>
+<script>!function(){
+"use strict";
+if(typeof FilterState==="undefined"||typeof TAB_META==="undefined"||typeof switchTab!=="function")return;
+var pad=function(n){return String(n).padStart(2,"0")};
+var dayNum=function(y,m,d){return Math.round(Date.UTC(y,m-1,d)/864e5)};
+var wdOf=function(n){return((n%7)+7+4)%7};
+var fromNum=function(n){var t=new Date(n*864e5);return{y:t.getUTCFullYear(),m:t.getUTCMonth()+1,d:t.getUTCDate()}};
+var labelDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]+" "+p.y};
+var shortDay=function(n){var p=fromNum(n);return pad(p.d)+" "+MONTHS[p.m-1]};
+var DOW=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+var pc=function(v){return(v>=0?"+":"−")+Math.abs(v*100).toFixed(0)+"%"};
+var closedOn=function(code,wd){return typeof WEEKEND_CLOSED!=="undefined"&&WEEKEND_CLOSED.has(String(code).trim())&&(wd===5||wd===6)};
+var rowNum=function(r){return r.year&&r.month&&r.day!=null?dayNum(r.year,r.month,r.day):null};
+function scopePass(r){
+  var ns=function(k){return typeof narrowedSelection==="function"&&FilterState[k]&&FilterState[k].options.length?narrowedSelection(k):null};
+  var st=ns("store"),ar=ns("area"),sg=ns("segment"),fm=ns("format");
+  if(st&&!st.has(r.storeCode))return!1;if(ar&&!ar.has(r.area))return!1;
+  if(sg&&!sg.has(r.segment))return!1;if(fm&&!fm.has(r.format))return!1;
+  var q=typeof globalSearchTerm!=="undefined"?globalSearchTerm:"";
+  return!q||(r.store+" "+r.storeCode+" "+r.area).toLowerCase().includes(q);
+}
+function storeName(r){var s=String(r.store||"");return s.startsWith(String(r.storeCode))?s:r.storeCode+" - "+s}
+var evOn=function(n){var E=window.__dashEvents;return E?E.on(n).map(function(e){return e.name}):[]};
+
+/* ---------- rules (all relative to each store's own history) ---------- */
+var RULE={
+  drop:{label:"Sudden drop",icon:"fa-arrow-trend-down"},
+  missing:{label:"Missing sales",icon:"fa-calendar-xmark"},
+  trend:{label:"Declining trend",icon:"fa-chart-line"},
+  waste:{label:"Wastage spike",icon:"fa-trash-can"},
+  ticket:{label:"Ticket drop",icon:"fa-receipt"},
+  target:{label:"Behind target",icon:"fa-bullseye"}
+};
+var SEV_RANK={high:0,medium:1,info:2},SEV_TEXT={high:"High",medium:"Medium",info:"Info"};
+
+function computeAlerts(){
+  var raw=window.__rawData||[];if(!raw.length)return null;
+  var L=0;raw.forEach(function(r){if(r.net>0){var n=rowNum(r);n!=null&&n>L&&(L=n)}});if(!L)return null;
+  var from=L-62,lyFrom=L-364-41,lyTo=L-364,stores=new Map();
+  // pass 1: the last 9 weeks, stores in the current filters
+  raw.forEach(function(r){
+    var n=rowNum(r);if(n==null||n<from||n>L||!scopePass(r))return;
+    var code=String(r.storeCode),s=stores.get(code);
+    s||stores.set(code,s={code:code,name:storeName(r),area:r.area,segment:r.segment,format:r.format,last:n,d:new Map,ly:new Map});
+    var x=s.d.get(n)||{net:0,cc:0};x.net+=r.net||0;x.cc+=r.orders||0;s.d.set(n,x);n>=s.last&&(s.last=n,s.area=r.area,s.name=storeName(r));
+  });
+  // pass 2: the same weeks last year for those stores (by store code, whatever manager they had then)
+  raw.forEach(function(r){var n=rowNum(r);if(n==null||n<lyFrom||n>lyTo)return;var s=stores.get(String(r.storeCode));s&&s.ly.set(n,(s.ly.get(n)||0)+(r.net||0))});
+  var net=function(s,n){var x=s.d.get(n);return x?x.net:0},cc=function(s,n){var x=s.d.get(n);return x?x.cc:0};
+  var sumR=function(f,a,b){var t=0;for(var n=a;n<=b;n++)t+=f(n);return t};
+  // wastage by store and day
+  var W=new Map(),wMin=Infinity,wMax=-Infinity;
+  (window.__wastageData||[]).forEach(function(w){var n=w.year&&w.month&&w.day!=null?dayNum(w.year,w.month,w.day):null;if(n==null||n<L-62||n>L)return;
+    wMin=Math.min(wMin,n);wMax=Math.max(wMax,n);var k=String(w.storeCode),m=W.get(k);m||W.set(k,m={day:new Map,item:new Map});
+    m.day.set(n,(m.day.get(n)||0)+(w.wastageCost||0));n>L-7&&m.item.set(w.itemName||w.itemNo,(m.item.get(w.itemName||w.itemNo)||0)+(w.wastageCost||0))});
+  var A=[],evL=evOn(L);
+  stores.forEach(function(s){
+    var base={code:s.code,store:s.name,area:s.area,segment:s.segment,format:s.format};
+    var push=function(o){A.push(Object.assign({},base,o))};
+    // usual for a weekday: average of the same weekday over the previous 8 weeks (days with sales)
+    var usual=function(n,f){var v=[];for(var k=1;k<=8;k++){var x=s.d.get(n-7*k);x&&x.net>0&&v.push(f(x))}return v.length>=3?v.reduce(function(a,b){return a+b},0)/v.length:null};
+    var tradesOn=function(n){var c=0;for(var k=1;k<=4;k++)net(s,n-7*k)>0&&c++;return c>=3};
+    // 1) sudden drop on the latest day
+    var lv=net(s,L),u=usual(L,function(x){return x.net});
+    if(lv>0&&u>0&&!closedOn(s.code,wdOf(L))){var ch=lv/u-1;
+      if(ch<=-.35){var uc=usual(L,function(x){return x.cc}),cch=uc>0?cc(s,L)/uc-1:null;
+        push({type:"drop",sev:evL.length?"info":ch<=-.5?"high":"medium",score:-ch,
+          text:DOW[wdOf(L)]+" "+shortDay(L)+": "+fmtCur(lv)+" vs its usual "+DOW[wdOf(L)]+" "+fmtCur(u)+" ("+pc(ch)+")."+(cch!=null?" Customers "+pc(cch)+", average ticket "+(cc(s,L)>0&&uc>0?pc((lv/cc(s,L))/(u/uc)-1):"—")+".":"")+(evL.length?" Note: "+evL.join(", ")+" that day.":"")})}}
+    // 2) missing sales in the last 7 days on days the store normally trades
+    var miss=[];for(var n=L-6;n<=L;n++){if(closedOn(s.code,wdOf(n))||net(s,n)>0)continue;tradesOn(n)&&miss.push(n)}
+    miss.length&&push({type:"missing",sev:miss.length>=2?"high":"medium",score:miss.length,
+      text:"No sales on "+miss.map(shortDay).join(", ")+", but the store normally trades on "+(miss.length===1?"that day":"those days")+". Closed, or data not uploaded?"});
+    // 3) declining trend: consecutive weeks below the same weeks last year (364 days back)
+    var wk=[];for(var k=0;k<6;k++){var a=L-7*k-6,b=L-7*k,ty=sumR(function(n){return net(s,n)},a,b),ly=sumR(function(n){return s.ly.get(n-364)||0},a,b);wk.push(ly>0&&ty>0?ty/ly-1:null)}
+    var run=0;for(var i=0;i<wk.length&&wk[i]!=null&&wk[i]<0;i++)run++;
+    if(run>=3){var seq=wk.slice(0,run).reverse();
+      push({type:"trend",sev:run>=4||wk[0]<=-.1?"high":"medium",score:run+(-wk[0]),
+        text:run+" weeks in a row below the same weeks last year: "+seq.map(pc).join(", ")+" (latest week last)."})}
+    // 4) wastage spike: this week's wastage % vs the weeks before (only where wastage is loaded)
+    var wm=W.get(s.code);
+    if(wm&&wMax>=L-6){var wa=Math.max(L-34,wMin),wt=sumR(function(n){return wm.day.get(n)||0},L-6,L),st=sumR(function(n){return net(s,n)},L-6,L);
+      var wb=sumR(function(n){return wm.day.get(n)||0},wa,L-7),sb=sumR(function(n){return net(s,n)},wa,L-7);
+      if(L-7-wa+1>=7&&st>0&&sb>0){var pt=wt/st,pb=wb/sb;
+        if(pt>=.01&&pt>=2*pb){var top=[...wm.item.entries()].sort(function(x,y){return y[1]-x[1]})[0];
+          push({type:"waste",sev:pt>=.03&&pt>=3*pb?"high":"medium",score:pb>0?pt/pb:10,
+            text:"Wastage "+(pt*100).toFixed(1)+"% of sales this week vs "+(pb*100).toFixed(1)+"% in the weeks before ("+fmtCur(wt)+" this week)."+(top?" Top item: "+top[0]+".":"")})}}}
+    // 5) ticket drop: this week's average ticket vs the previous 8 weeks, customers steady
+    var tN=sumR(function(n){return net(s,n)},L-6,L),tC=sumR(function(n){return cc(s,n)},L-6,L),bN=sumR(function(n){return net(s,n)},L-62,L-7),bC=sumR(function(n){return cc(s,n)},L-62,L-7);
+    if(tC>0&&bC>0&&tN>0&&bN>0){var at=tN/tC,ab=bN/bC,atc=at/ab-1,dTr=sumR(function(n){return net(s,n)>0?1:0},L-6,L),dBr=sumR(function(n){return net(s,n)>0?1:0},L-62,L-7);
+      var ccc=dTr&&dBr?(tC/dTr)/(bC/dBr)-1:0;
+      atc<=-.1&&ccc>-.1&&push({type:"ticket",sev:atc<=-.2?"high":"medium",score:-atc,
+        text:"Average ticket "+fmtAT(at)+" this week vs "+fmtAT(ab)+" over the 8 weeks before ("+pc(atc)+"). Customers per day "+pc(ccc)+"."})}
+  });
+  // 6) behind target, from the Target Pace projection for the latest month
+  var P=null,pL=fromNum(L);
+  if(window.__paceCompute){try{P=window.__paceCompute(scopePass,pL.y,pL.m)}catch(e){P=null}}
+  P&&P.asOf&&P.asOf<P.D&&P.rows.forEach(function(r){if(r.projPct==null||r.projPct>=.9)return;
+    A.push({code:String(r.storeCode),store:r.store,area:r.area,segment:r.segment,format:r.format,type:"target",sev:r.projPct<.75?"high":"medium",score:1-r.projPct,
+      text:"Projected "+(r.projPct*100).toFixed(1)+"% of the "+MONTHS[pL.m-1]+" target. Needs "+fmtCur(r.needDay)+" a day for the "+r.remOpen+" open days left; now doing "+fmtCur(r.avgDay)+"."})});
+  A.sort(function(a,b){return SEV_RANK[a.sev]-SEV_RANK[b.sev]||b.score-a.score});
+  var flagged=new Set(A.map(function(a){return a.code}));
+  return{L:L,alerts:A,stores:stores.size,fine:[...stores.keys()].filter(function(c){return!flagged.has(c)}).length,wasteLoaded:wMax>=L-6};
+}
+
+/* ---------- page ---------- */
+TAB_META.alerts={section:"tabAlerts",title:"Smart Alerts",sub:"Stores that are out of their normal pattern, worst first."};
+var sec=document.createElement("div");sec.className="view-section";sec.id="tabAlerts";
+sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-bell"></i> Smart alerts<span class="right" id="saAsOf"></span></div>'+
+ '<div class="pace-kpis" id="saKpis"></div>'+
+ '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;"><div class="sa-chips" id="saTypes"></div>'+
+ '<div style="display:flex;gap:8px;"><div class="segmented" id="saSev"><button type="button" class="seg-btn active" data-sev="all">All</button><button type="button" class="seg-btn" data-sev="high">High</button><button type="button" class="seg-btn" data-sev="medium">Medium</button></div>'+
+ '<button type="button" class="export-btn excel" id="saExcel"><i class="fas fa-file-excel"></i> Excel</button></div></div></div>'+
+ '<div class="table-container"><div class="sa-list" id="saList"></div></div>'+
+ '<div class="panel"><div class="pace-note" id="saHow"><b>How the checks work</b> (each store against its own history, as of the latest day with sales):<br>'+
+ '<b>Sudden drop</b>: that day\'s sales at least 35% below the store\'s average for the same weekday over the previous 8 weeks (High at 50%). '+
+ '<b>Missing sales</b>: no sales in the last 7 days on a weekday the store traded on at least 3 of the previous 4 weeks. '+
+ '<b>Declining trend</b>: 3 or more weeks in a row below the same weeks last year (364 days back). '+
+ '<b>Wastage spike</b>: this week\'s wastage % of sales at least double the weeks before, and at least 1%. '+
+ '<b>Ticket drop</b>: this week\'s average ticket at least 10% below the previous 8 weeks while customers per day hold steady. '+
+ '<b>Behind target</b>: projected month-end below 90% of target (High below 75%), from Target Pace. '+
+ 'Alerts on event days (Eid, National Day and so on) are shown as Info. The page follows the Manager, Store, Segment and Format filters and the search box.</div></div>';
+var anchor=document.getElementById("tabLyPace")||document.getElementById("tabPace")||document.getElementById("tabFormatAm");anchor?anchor.after(sec):document.querySelector(".dashboard").appendChild(sec);
+var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="alerts";nb.title="Smart Alerts";
+nb.innerHTML='<i class="fas fa-bell"></i><span class="nav-label">Smart Alerts</span><span class="tab-badge" id="saBadge" style="display:none;">0</span>';
+var ab=document.querySelector('.tab-btn[data-tab="overview"]');ab?ab.after(nb):document.querySelector(".sidebar-nav").appendChild(nb);
+nb.addEventListener("click",function(){switchTab("alerts")});
+try{Object.assign(AR_TEXT,{"Smart Alerts":"تنبيهات ذكية","Sudden drop":"انخفاض مفاجئ","Missing sales":"مبيعات مفقودة","Declining trend":"اتجاه هابط","Wastage spike":"ارتفاع الهدر","Ticket drop":"انخفاض الفاتورة","Behind target":"متأخر عن الهدف"})}catch(e){}
+
+var R=null,fType="all",fSev="all";
+function kpi(k,v,s,cls){return'<div class="pace-kpi"><div class="k">'+k+'</div><div class="v '+(cls||"")+'">'+v+'</div><div class="s">'+(s||"&nbsp;")+"</div></div>"}
+function visible(){return R?R.alerts.filter(function(a){return(fType==="all"||a.type===fType)&&(fSev==="all"||a.sev===fSev)}):[]}
+function update(){
+  try{R=computeAlerts()}catch(e){console.error("Smart alerts failed",e);R=null}
+  var b=document.getElementById("saBadge"),hi=R?R.alerts.filter(function(a){return a.sev==="high"}).length:0;
+  b&&(b.style.display=hi?"inline-flex":"none",b.textContent=hi,b.title=hi+" high alerts");
+  sec.classList.contains("active")&&render();
+}
+function render(){
+  var list=document.getElementById("saList");
+  if(!R){document.getElementById("saKpis").innerHTML="";document.getElementById("saTypes").innerHTML="";document.getElementById("saAsOf").textContent="";
+    list.innerHTML='<div class="modal-empty" style="padding:30px;text-align:center;color:var(--text-light);">Load sales data to see alerts.</div>';return}
+  var c={high:0,medium:0,info:0};R.alerts.forEach(function(a){c[a.sev]++});
+  document.getElementById("saAsOf").textContent="As of "+DOW[wdOf(R.L)]+" "+labelDay(R.L)+(R.wasteLoaded?"":" · wastage check waits for wastage data");
+  document.getElementById("saKpis").innerHTML=kpi("High",c.high,"act today",c.high?"bad":"")+kpi("Medium",c.medium,"watch this week",c.medium?"warn":"")+kpi("Info",c.info,"event days")+kpi("Stores fine",R.fine,"of "+R.stores+" in the current filters","good");
+  var tc={};R.alerts.forEach(function(a){tc[a.type]=(tc[a.type]||0)+1});
+  document.getElementById("saTypes").innerHTML='<button type="button" class="sa-chip'+(fType==="all"?" active":"")+'" data-t="all">All<span class="n">'+R.alerts.length+"</span></button>"+
+    Object.keys(RULE).map(function(t){return'<button type="button" class="sa-chip'+(fType===t?" active":"")+'" data-t="'+t+'">'+RULE[t].label+'<span class="n">'+(tc[t]||0)+"</span></button>"}).join("");
+  var v=visible();
+  list.innerHTML=v.length?v.map(function(a,i){return'<div class="sa-item" data-i="'+i+'" title="Click for day-wise detail"><div class="sa-ic '+a.sev+'"><i class="fas '+RULE[a.type].icon+'"></i></div>'+
+    '<div><div class="sa-t">'+escapeHtml(a.store)+" · "+RULE[a.type].label+'</div><div class="sa-d">'+escapeHtml(a.text)+'</div><div class="sa-m">'+escapeHtml([a.area,a.format].filter(Boolean).join(" · "))+"</div></div>"+
+    '<span class="sa-sev '+a.sev+'">'+SEV_TEXT[a.sev]+"</span></div>"}).join(""):
+    '<div style="padding:30px;text-align:center;color:var(--text-light);font-size:.86rem;">'+(R.alerts.length?"No alerts match this filter.":"No alerts. Every store in the current filters is within its normal range.")+"</div>";
+}
+document.getElementById("saTypes").addEventListener("click",function(e){var b=e.target.closest("[data-t]");b&&(fType=b.dataset.t,render())});
+document.getElementById("saSev").addEventListener("click",function(e){var b=e.target.closest("[data-sev]");if(!b)return;fSev=b.dataset.sev;
+  this.querySelectorAll("[data-sev]").forEach(function(x){x.classList.toggle("active",x===b)});render()});
+document.getElementById("saList").addEventListener("click",function(e){var it=e.target.closest(".sa-item");if(!it)return;var a=visible()[+it.dataset.i];
+  a&&window.openStoreDayModal&&window.openStoreDayModal(a.code,a.area)});
+document.getElementById("saExcel").addEventListener("click",function(){
+  if(!librariesReady())return;var v=visible();if(!v.length)return void showToast("Nothing to export","info");
+  guardBusy(this,"Exporting…",async function(){
+    var aoa=[["Severity","Alert","Store","Manager","Format","Details"]];v.forEach(function(a){aoa.push([SEV_TEXT[a.sev],RULE[a.type].label,a.store,a.area||"",a.format||"",a.text])});
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(aoa,{cols:[9,16,30,18,18,90]}),"Smart Alerts");
+    await downloadWorkbook(wb,"Smart_Alerts_"+(R?new Date(R.L*864e5).toISOString().slice(0,10):"")+".xlsx");showToast("Excel exported","success")})});
+var t=null;function soon(){clearTimeout(t);t=setTimeout(update,30)}
+document.addEventListener("dashboard:filtered",soon);
+document.addEventListener("dashboard:events-changed",soon);
+new MutationObserver(function(){sec.classList.contains("active")&&(R?render():update())}).observe(sec,{attributes:!0,attributeFilter:["class"]});
+}();</script>
+
+<!-- =====================================================================
+     ADD-ON v7.4 (new code only): 3D login page and interface polish
+     - Login: animated 3D sales-bar city (pure CSS 3D, no extra library), glass sign-in card,
+       show / hide password, dark mode support.
+     - Dashboard: 3D tilt on KPI cards, layered depth on panels, refined sidebar,
+       "3D effects" switch in the Actions menu (remembered in this browser).
+     Everything here is styling and decoration; no calculation is touched.
+     ===================================================================== -->
+<style>
+/* ---------- login: brand side with 3D scene ---------- */
+.login-page{background:#f5f7fb}
+.login-brand{background:radial-gradient(120% 90% at 20% 10%,#24408f 0%,#132a66 38%,#0a1736 75%,#070f24 100%)!important;isolation:isolate}
+.login-brand::before{opacity:0!important}
+.login-brand::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:linear-gradient(180deg,rgba(7,15,36,.85) 0%,rgba(7,15,36,.55) 30%,rgba(7,15,36,0) 50%,rgba(7,15,36,0) 82%,rgba(7,15,36,.7) 100%)}
+.login-brand>.login-logo,.login-brand>.login-hero,.login-brand>.login-tag{z-index:2}
+.login-brand{justify-content:flex-start!important}.login-hero{margin-top:7vh}.login-tag{margin-top:auto}
+.login-hero h1{font-size:46px;font-weight:700;letter-spacing:-1px;text-shadow:0 2px 24px rgba(0,0,0,.35)}
+.login-hero p{opacity:.85}
+.login-logo-mark{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);backdrop-filter:blur(8px)}
+.login-tag{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;padding:7px 14px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);font-size:13px}
+.login-tag::before{content:"";width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 10px #34d399}
+#login3d{position:absolute!important;inset:0;z-index:0;overflow:hidden;perspective:1100px;perspective-origin:50% 35%}
+#login3d .l3-stage{position:absolute;left:54%;top:70%;width:0;height:0;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.2,.7,.2,1)}
+#login3d .l3-city{position:absolute;left:-190px;top:-190px;width:380px;height:380px;transform-style:preserve-3d}
+#login3d .l3-floor{position:absolute;inset:-60px;border-radius:24px;background:
+  linear-gradient(rgba(125,170,255,.16) 1px,transparent 1px) 0 0/38px 38px,linear-gradient(90deg,rgba(125,170,255,.16) 1px,transparent 1px) 0 0/38px 38px,
+  radial-gradient(closest-side,rgba(64,120,255,.35),rgba(64,120,255,0));box-shadow:0 0 80px rgba(60,120,255,.25) inset}
+#login3d .l3-bar{position:absolute;width:26px;height:26px;transform-style:preserve-3d}
+#login3d .l3-bar>i{backface-visibility:visible;position:absolute;display:block;transition:transform 1.4s cubic-bezier(.3,.8,.2,1),height 1.4s cubic-bezier(.3,.8,.2,1),width 1.4s cubic-bezier(.3,.8,.2,1),background 1.4s}
+#login3d .l3-top{left:0;top:0;width:26px;height:26px}
+#login3d .l3-front{left:0;top:26px;width:26px;transform-origin:top;transform:rotateX(90deg)}
+#login3d .l3-side{left:26px;top:0;height:26px;transform-origin:left;transform:rotateY(-90deg)}
+#login3d .l3-ring{position:absolute;left:-150px;top:-150px;width:300px;height:300px;border-radius:50%;border:2px dashed rgba(125,190,255,.35);transform:translateZ(150px);animation:l3spin 28s linear infinite}
+#login3d .l3-ring.r2{left:-110px;top:-110px;width:220px;height:220px;border:1px solid rgba(52,211,153,.35);transform:translateZ(200px);animation-duration:18s;animation-direction:reverse}
+#login3d .l3-chip{position:absolute;transform-style:preserve-3d;padding:9px 14px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);
+  color:#fff;font:600 12px/1.2 Inter,system-ui,sans-serif;white-space:nowrap;backdrop-filter:blur(6px);box-shadow:0 12px 30px rgba(0,0,0,.35);display:flex;align-items:center;gap:8px}
+#login3d .l3-chip i{color:#7dd3fc}
+#login3d .l3-dots{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.55) 1px,transparent 1.5px);background-size:46px 46px;opacity:.18;mask-image:radial-gradient(70% 60% at 50% 40%,#000,transparent)}
+@keyframes l3spin{to{transform:translateZ(150px) rotate(360deg)}}
+@keyframes l3float{0%,100%{margin-top:0}50%{margin-top:-10px}}
+/* ---------- login: form side ---------- */
+.login-form-side{background:radial-gradient(80% 60% at 70% 20%,rgba(37,99,235,.08),transparent 70%),#f5f7fb!important;perspective:1200px}
+.login-card{background:rgba(255,255,255,.88);border:1px solid rgba(15,23,42,.06);border-radius:22px;padding:36px 34px 30px;max-width:420px!important;
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 24px 60px -18px rgba(30,58,138,.28);backdrop-filter:blur(10px);transform-style:preserve-3d;transition:transform .5s cubic-bezier(.2,.7,.2,1),box-shadow .3s}
+.login-card h2{font-size:28px;font-weight:700;letter-spacing:-.6px}
+.login-card input[type=email],.login-card input[type=password],.login-card input[type=text]#loginPass,#mfaCode{height:48px!important;border-radius:12px!important;border:1px solid #dfe3ea!important;background:#f8fafc!important;transition:border-color .15s,box-shadow .15s,background .15s}
+.login-card input:focus{background:#fff!important;border-color:#2563eb!important;box-shadow:0 0 0 4px rgba(37,99,235,.14)!important;outline:none}
+#loginBtn,#mfaBtn{height:50px!important;border-radius:12px!important;background:linear-gradient(135deg,#2563eb,#1d4ed8)!important;box-shadow:0 10px 24px -10px rgba(37,99,235,.7);transition:transform .12s,box-shadow .2s,filter .2s}
+#loginBtn:hover,#mfaBtn:hover{filter:brightness(1.07);box-shadow:0 14px 30px -10px rgba(37,99,235,.8)}
+#loginBtn:active,#mfaBtn:active{transform:translateY(1px) scale(.99)}
+.l3-pw{position:relative;display:block}
+.l3-pw input{padding-inline-end:46px!important}
+.l3-eye{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:none;border-radius:9px;background:transparent;color:#64748b;cursor:pointer;font-size:15px}
+.l3-eye:hover{background:#eef2f7;color:#0f172a}
+.l3-mobile-logo{display:none;align-items:center;gap:10px;font-weight:700;color:#0f172a;margin-bottom:8px}
+.l3-mobile-logo span{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#2563eb,#1e3a8a);color:#fff;display:inline-flex;align-items:center;justify-content:center}
+.l3-secure{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px;font-size:12px;color:#94a3b8}
+@media (max-width:820px){.login-brand{min-height:300px!important}.login-hero{margin-top:12px}.login-hero h1{font-size:28px}#login3d{opacity:.4}#login3d .l3-stage{top:88%;left:78%}#login3d .l3-chip{display:none}.login-card{padding:26px 22px}}
+/* login dark theme */
+[data-theme="dark"] .login-page,[data-theme="dark"] .login-form-side{background:radial-gradient(80% 60% at 70% 20%,rgba(96,140,255,.1),transparent 70%),#0b1020!important}
+[data-theme="dark"] .login-card{background:rgba(22,27,40,.85);border-color:rgba(255,255,255,.07);box-shadow:0 24px 60px -18px rgba(0,0,0,.7)}
+[data-theme="dark"] .login-card h2,[data-theme="dark"] .l3-mobile-logo{color:#f1f5f9}
+[data-theme="dark"] .login-card label,[data-theme="dark"] .login-check{color:#cbd5e1}
+[data-theme="dark"] .login-card input[type=email],[data-theme="dark"] .login-card input[type=password],[data-theme="dark"] .login-card input#loginPass,[data-theme="dark"] #mfaCode{background:#111827!important;border-color:#273044!important;color:#f1f5f9!important}
+[data-theme="dark"] .l3-eye:hover{background:#1f2937;color:#f1f5f9}
+
+/* ---------- dashboard polish (only when 3D effects are on) ---------- */
+html.ui3d body{background:radial-gradient(1200px 600px at 100% -10%,color-mix(in srgb,var(--primary) 9%,transparent),transparent 60%),radial-gradient(900px 500px at -10% 110%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 60%),var(--bg);background-attachment:fixed}
+html.ui3d .panel,html.ui3d .chart-card,html.ui3d .table-container,html.ui3d .executive-summary{border-radius:14px;
+  box-shadow:0 1px 1px color-mix(in srgb,var(--text-main) 4%,transparent),0 10px 30px -18px color-mix(in srgb,var(--text-main) 30%,transparent)}
+html.ui3d .kpi-card,html.ui3d .pace-kpi,html.ui3d .wastage-kpi-card,html.ui3d .insight-card,html.ui3d .leaderboard-item{position:relative;transform-style:preserve-3d;will-change:transform;
+  transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s;box-shadow:0 1px 2px color-mix(in srgb,var(--text-main) 5%,transparent),0 12px 28px -20px color-mix(in srgb,var(--text-main) 40%,transparent)}
+html.ui3d .kpi-card{border-radius:16px}
+html.ui3d .ui3d-hover{box-shadow:0 2px 4px color-mix(in srgb,var(--text-main) 6%,transparent),0 26px 48px -22px color-mix(in srgb,var(--primary) 45%,transparent)!important;z-index:2}
+html.ui3d .ui3d-glare{position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;
+  background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,#fff 22%,transparent),transparent 60%);mix-blend-mode:soft-light}
+[data-theme="dark"].ui3d .ui3d-glare{background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),rgba(255,255,255,.10),transparent 60%);mix-blend-mode:normal}
+html.ui3d .ui3d-hover>.ui3d-glare{opacity:1}
+html.ui3d .kpi-main,html.ui3d .pace-kpi .v{transform:translateZ(18px)}
+html.ui3d .sidebar{box-shadow:1px 0 0 var(--sb-border),12px 0 40px -30px color-mix(in srgb,var(--text-main) 40%,transparent)}
+html.ui3d .tab-btn.active{background:linear-gradient(90deg,var(--primary-light),transparent 120%);box-shadow:inset 3px 0 0 var(--primary)}
+[dir="rtl"].ui3d .tab-btn.active{box-shadow:inset -3px 0 0 var(--primary)}
+html.ui3d .tab-btn.wastage-tab.active{box-shadow:inset 3px 0 0 var(--waste)}
+html.ui3d .brand-mark{background:linear-gradient(135deg,var(--primary),color-mix(in srgb,var(--primary) 55%,#000));box-shadow:0 6px 16px -6px var(--primary)}
+html.ui3d .btn-primary,html.ui3d .toggle-btn.active,html.ui3d .seg-btn.active{box-shadow:0 6px 14px -8px var(--primary)}
+html.ui3d .topbar{border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent)}
+html.ui3d .modal-box{border-radius:16px;box-shadow:0 30px 80px -20px rgba(0,0,0,.45)}
+html.ui3d .modal-overlay.open .modal-box{animation:ui3dModal .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes ui3dModal{from{opacity:0;transform:perspective(900px) rotateX(8deg) translateY(16px) scale(.97)}to{opacity:1;transform:none}}
+html.ui3d .view-section.active{animation:ui3dIn .45s cubic-bezier(.2,.8,.2,1)}
+@keyframes ui3dIn{from{opacity:0;transform:perspective(1200px) rotateX(3deg) translateY(10px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#login3d .l3-ring{animation:none}html.ui3d .view-section.active,html.ui3d .modal-overlay.open .modal-box{animation:none}}
+</style>
+<script>!function(){
+"use strict";
+var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+function safeGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function safeSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+
+/* =============== LOGIN PAGE =============== */
+var overlay=document.getElementById("loginOverlay"),brand=overlay&&overlay.querySelector(".login-brand");
+if(overlay&&brand){
+  // 3D scene: a city of sales bars on a glowing grid, slowly turning, follows the mouse
+  var N=7,GAP=50,scene=document.createElement("div");scene.id="login3d";scene.setAttribute("aria-hidden","true");
+  scene.innerHTML='<div class="l3-dots"></div><div class="l3-stage"><div class="l3-city"><div class="l3-floor"></div></div></div>';
+  brand.insertBefore(scene,brand.firstChild);
+  var stage=scene.querySelector(".l3-stage"),city=scene.querySelector(".l3-city"),bars=[];
+  var ring=document.createElement("div");ring.className="l3-ring";city.appendChild(ring);
+  var ring2=document.createElement("div");ring2.className="l3-ring r2";city.appendChild(ring2);
+  ring.style.left=ring.style.top="40px";ring2.style.left=ring2.style.top="80px";
+  for(var gy=0;gy<N;gy++)for(var gx=0;gx<N;gx++){
+    var b=document.createElement("div");b.className="l3-bar";b.style.left=(gx*GAP+20)+"px";b.style.top=(gy*GAP+20)+"px";
+    b.innerHTML='<i class="l3-top"></i><i class="l3-front"></i><i class="l3-side"></i>';city.appendChild(b);
+    bars.push({el:b,top:b.children[0],front:b.children[1],side:b.children[2],gx:gx,gy:gy});
+  }
+  var chips=[];
+  // floating labels around the city (no figures, just what the platform covers)
+  [["fa-chart-line","Sales",-210,-120,170],["fa-bullseye","Targets",150,-170,210],["fa-trash-can","Wastage",170,90,130],["fa-store","Every store",-200,110,120]].forEach(function(c,i){
+    var el=document.createElement("div");el.className="l3-chip";el.innerHTML='<i class="fas '+c[0]+'"></i>'+c[1];
+    el.style.left=c[2]+"px";el.style.top=c[3]+"px";el.dataset.z=c[4];chips.push(el);
+    el.style.animation=reduce?"none":"l3float "+(5+i)+"s ease-in-out "+(i*.7)+"s infinite";stage.appendChild(el)});
+  function colorFor(t){ // t 0..1 -> deep blue .. cyan .. mint
+    var c=t<.5?[[37,99,235],[56,189,248]]:[[56,189,248],[52,211,153]],k=t<.5?t*2:(t-.5)*2;
+    return c[0].map(function(v,i){return Math.round(v+(c[1][i]-v)*k)})}
+  var tick=0;
+  function shape(){
+    tick++;
+    bars.forEach(function(o){
+      var cx=o.gx-(N-1)/2,cy=o.gy-(N-1)/2,d=Math.sqrt(cx*cx+cy*cy);
+      var wave=Math.sin(tick*.9+o.gx*.8)*.5+Math.cos(tick*.7+o.gy*.9)*.5;
+      var h=Math.max(12,Math.round(150-d*26+wave*42+(Math.random()*26-13))),t=Math.min(1,Math.max(0,h/170)),rgb=colorFor(t);
+      var top="rgb("+rgb.map(function(v){return Math.min(255,v+40)}).join(",")+")",fr="rgb("+rgb.join(",")+")",sd="rgb("+rgb.map(function(v){return Math.round(v*.62)}).join(",")+")";
+      o.top.style.transform="translateZ("+h+"px)";o.top.style.background=top;o.top.style.boxShadow=t>.75?"0 0 18px rgba(52,211,153,.75)":"none";
+      o.front.style.height=h+"px";o.front.style.background="linear-gradient(0deg,"+fr+","+sd+")";
+      o.side.style.width=h+"px";o.side.style.background="linear-gradient(90deg,"+sd+","+fr+")";
+    });
+  }
+  var ang=-45,mx=0,my=0,raf=null,timer=null,last=0;
+  function place(){var tx=58+my*6,rz=ang+mx*10;stage.style.transform="scale(.92) rotateX("+tx.toFixed(2)+"deg) rotateZ("+rz.toFixed(2)+"deg) translateZ(-40px)";
+    // keep the labels facing the viewer
+    chips.forEach(function(c){c.style.transform="translateZ("+c.dataset.z+"px) rotateZ("+(-rz).toFixed(2)+"deg) rotateX("+(-tx).toFixed(2)+"deg)"})}
+  function loop(ts){if(!running())return void(raf=null);if(!reduce&&ts-last>40){ang=-45+Math.sin(ts/7000)*14;last=ts;place()}raf=requestAnimationFrame(loop)}
+  function running(){return overlay.style.display!=="none"&&getComputedStyle(overlay).display!=="none"}
+  function start(){if(!running())return;shape();place();raf||(raf=requestAnimationFrame(loop));timer||reduce||(timer=setInterval(function(){running()?shape():stop()},2600))}
+  function stop(){timer&&clearInterval(timer);timer=null;raf&&cancelAnimationFrame(raf);raf=null}
+  brand.addEventListener("pointermove",function(e){var r=brand.getBoundingClientRect();mx=(e.clientX-r.left)/r.width-.5;my=(e.clientY-r.top)/r.height-.5;place()});
+  brand.addEventListener("pointerleave",function(){mx=my=0;place()});
+  new MutationObserver(function(){running()?start():stop()}).observe(overlay,{attributes:!0,attributeFilter:["style"]});
+  start();
+
+  // form side: card tilt, show / hide password, mobile logo, security note
+  var side=overlay.querySelector(".login-form-side"),form=document.getElementById("loginForm");
+  if(form){
+    var pw=document.getElementById("loginPass");
+    if(pw){var wrap=document.createElement("span");wrap.className="l3-pw";pw.parentNode.insertBefore(wrap,pw);wrap.appendChild(pw);
+      var eye=document.createElement("button");eye.type="button";eye.className="l3-eye";eye.setAttribute("aria-label","Show password");eye.innerHTML='<i class="fas fa-eye"></i>';wrap.appendChild(eye);
+      eye.addEventListener("click",function(){var show=pw.type==="password";pw.type=show?"text":"password";eye.innerHTML='<i class="fas '+(show?"fa-eye-slash":"fa-eye")+'"></i>';eye.setAttribute("aria-label",show?"Hide password":"Show password");pw.focus()})}
+    var sec=document.createElement("div");sec.className="l3-secure";sec.innerHTML='<i class="fas fa-lock"></i> Secure sign-in · two-step verification for admins';form.appendChild(sec);
+  }
+  side&&!reduce&&side.addEventListener("pointermove",function(e){var c=side.querySelector(".login-card:not([style*='display: none'])")||form;if(!c)return;
+    var r=side.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;c.style.transform="rotateY("+(x*6).toFixed(2)+"deg) rotateX("+(-y*6).toFixed(2)+"deg)"});
+  side&&side.addEventListener("pointerleave",function(){side.querySelectorAll(".login-card").forEach(function(c){c.style.transform=""})});
+}
+
+/* =============== DASHBOARD 3D EFFECTS =============== */
+var KEY="ui3d",on=safeGet(KEY)!=="0";
+document.documentElement.classList.toggle("ui3d",on);
+var SEL=".kpi-card,.pace-kpi,.wastage-kpi-card,.insight-card,.leaderboard-item",cur=null;
+function reset(el){if(!el)return;el.style.transform="";el.classList.remove("ui3d-hover")}
+document.addEventListener("pointermove",function(e){
+  if(!on||reduce||e.pointerType==="touch")return;
+  var el=e.target.closest&&e.target.closest(SEL);
+  if(el!==cur){reset(cur);cur=el}
+  if(!el)return;
+  if(!el.querySelector(":scope>.ui3d-glare")){var g=document.createElement("span");g.className="ui3d-glare";el.appendChild(g)}
+  var r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height,amp=el.classList.contains("leaderboard-item")?3:7;
+  el.classList.add("ui3d-hover");
+  el.style.transform="perspective(900px) rotateX("+((.5-y)*amp).toFixed(2)+"deg) rotateY("+((x-.5)*amp).toFixed(2)+"deg) translateY(-3px)";
+  el.style.setProperty("--mx",(x*100).toFixed(1)+"%");el.style.setProperty("--my",(y*100).toFixed(1)+"%");
+},{passive:!0});
+document.addEventListener("pointerleave",function(){reset(cur);cur=null});
+// switch in the Actions menu
+var themeBtn=document.getElementById("themeToggle");
+if(themeBtn){var sw=document.createElement("button");sw.className="tool-item";sw.id="ui3dBtn";sw.setAttribute("role","menuitem");themeBtn.after(sw);
+  var label=function(){sw.innerHTML='<i class="fas fa-cube"></i><span>3D effects: '+(on?"On":"Off")+"</span>"};label();
+  sw.addEventListener("click",function(){on=!on;safeSet(KEY,on?"1":"0");document.documentElement.classList.toggle("ui3d",on);on||(reset(cur),cur=null);label();showToast("3D effects "+(on?"on":"off"),"info")})}
+try{Object.assign(AR_TEXT,{"Secure sign-in · two-step verification for admins":"تسجيل دخول آمن · تحقق بخطوتين للمشرفين"})}catch(e){}
+}();</script>
+
+<style>
+#mmLink{border-top:1px solid var(--border);padding:16px 20px 20px;background:var(--surface);}
+#mmLink .mml-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+#mmLink .mml-title{font-weight:700;font-size:.95rem;color:var(--text-main);display:flex;align-items:center;gap:8px;}
+#mmLink .mml-title i{color:var(--primary);}
+#mmLink .mml-head .segmented{margin-left:auto;}
+#mmLink .mml-sum{font-size:.85rem;color:var(--text-main);margin:4px 0 12px;line-height:1.5;}
+#mmLink .mml-sum b{font-weight:700;}
+#mmLink .mml-note{font-size:.78rem;color:var(--text-muted);margin-top:10px;}
+#mmLink .mml-msg{font-size:.85rem;color:var(--text-muted);padding:10px 0;display:flex;align-items:center;gap:8px;}
+#mmLink .mml-msg.err{color:var(--danger);}
+#mmLink .mml-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media (max-width:900px){#mmLink .mml-grid{grid-template-columns:1fr;}}
+#mmLink .mml-card{border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+#mmLink .mml-card h5{margin:0;padding:8px 12px;font-size:.8rem;font-weight:700;background:var(--surface-hover);border-bottom:1px solid var(--border);color:var(--text-main);}
+#mmLink .mml-card.drop h5{color:var(--danger);}
+#mmLink .mml-card.gain h5{color:var(--success);}
+#mmLink table{width:100%;border-collapse:collapse;font-size:.8rem;}
+#mmLink th,#mmLink td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;}
+#mmLink th{font-weight:600;color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.02em;}
+#mmLink th:first-child,#mmLink td:first-child{text-align:left;white-space:normal;}
+#mmLink tr:last-child td{border-bottom:0;}
+#mmLink .mml-cat{display:block;font-size:.7rem;color:var(--text-muted);}
+#mmLink .mml-hero{display:inline-block;font-size:.65rem;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:6px;background:var(--warning-light);color:var(--warning);vertical-align:1px;}
+#mmLink .mml-tag{display:inline-block;font-size:.65rem;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:6px;background:var(--bg);color:var(--text-muted);border:1px solid var(--border);vertical-align:1px;}
+#mmLink .mml-empty{padding:12px;font-size:.8rem;color:var(--text-muted);}
+#mmLink .btn-link{background:none;border:0;color:var(--primary);cursor:pointer;font-weight:600;font-size:.8rem;padding:0;}
+</style>
+<script>
+/* SALES <-> MENU MIX LINK (v7.5)
+   Adds "What changed in the items" under the store day-wise popup. The numbers come from the Menu Mix page
+   (viewx-yousuf.github.io, the same window the Menu Mix button opens), which already holds this person's item
+   data and sign-in. This page sends it a store and two periods; Menu Mix sends back each item's sales and qty.
+   Needs the v7.5 Menu Mix page (it answers 'viewx-item-compare'). */
+!function(){
+  if(window.self!==window.top)return;
+  var O="https://viewx-yousuf.github.io",URL="https://viewx-yousuf.github.io/Menu-Mix/",AUTO="viewx-mm-items-auto",TOP=8,HERO=5;
+  var frame=null,cur=null,mode="prev",seq=0,pending={};
+  function $id(i){return document.getElementById(i)}
+  function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+  function n0(v){return Math.round(v||0).toLocaleString("en-US")}
+  function sgn(v){return(v>0?"+":v<0?"−":"")+n0(Math.abs(v))}
+  function pct(a,b){if(!b)return a?"new":"—";var p=(a/b-1)*100;return(p>=0?"+":"−")+Math.abs(p).toFixed(1)+"%"}
+  function cls(v){return v>0?"pct-up":v<0?"pct-down":""}
+  function pad(n){return String(n).padStart(2,"0")}
+  function iso(y,m,d){return y+"-"+pad(m)+"-"+pad(d)}
+  function dim(y,m){return new Date(y,m,0).getDate()}
+  function nice(d){var x=new Date(d+"T00:00:00");return x.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+  function range(r){var a=new Date(r.from+"T00:00:00"),b=new Date(r.to+"T00:00:00");
+    if(r.from===r.to)return nice(r.from);
+    if(a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth())return a.getDate()+"–"+b.getDate()+" "+b.toLocaleDateString("en-GB",{month:"short",year:"numeric"});
+    return nice(r.from)+" – "+nice(r.to)}
+
+  // month and year the popup is showing: read from its own header, which openStoreDayModal fills in
+  function popupMonth(){
+    var sub=($id("modalStoreSub")||{}).textContent||"",y=+(($id("modalHeaderCY")||{}).textContent||0),M=typeof MONTHS!=="undefined"?MONTHS:["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    for(var i=0;i<M.length;i++){var re=new RegExp("\\b"+M[i]+"\\s+(\\d{4})\\b");var m=sub.match(re);if(m)return{m:i+1,y:+m[1]}}
+    return y?{m:new Date().getMonth()+1,y:y}:null}
+  function periods(pm,which){
+    var f=Math.max(1,Math.min(31,+(($id("dayFrom")||{}).value||1)||1)),t=Math.max(f,Math.min(31,+(($id("dayTo")||{}).value||31)||31));
+    var a={from:iso(pm.y,pm.m,Math.min(f,dim(pm.y,pm.m))),to:iso(pm.y,pm.m,Math.min(t,dim(pm.y,pm.m)))};
+    var by=pm.y,bm=pm.m;if(which==="prev"){bm--;if(bm<1){bm=12;by--}}else by--;
+    var b={from:iso(by,bm,Math.min(f,dim(by,bm))),to:iso(by,bm,Math.min(t,dim(by,bm)))};
+    // never ask for days in the future
+    var today=new Date(),td=iso(today.getFullYear(),today.getMonth()+1,today.getDate());
+    if(a.to>td)a.to=td<a.from?a.from:td;
+    return{a:a,b:b}}
+
+  function panel(){
+    var p=$id("mmLink");if(p)return p;
+    var body=document.querySelector("#storeDayModal .modal-body");if(!body)return null;
+    p=document.createElement("div");p.id="mmLink";
+    p.innerHTML='<div class="mml-head"><div class="mml-title"><i class="fas fa-utensils"></i> What changed in the items <span class="mml-tag">Menu Mix</span></div>'+
+      '<div class="segmented"><button type="button" class="seg-btn active" data-mml="prev">vs previous month</button><button type="button" class="seg-btn" data-mml="ly">vs same month last year</button></div></div>'+
+      '<div id="mmlBody"></div>';
+    body.appendChild(p);
+    p.querySelectorAll("[data-mml]").forEach(function(b){b.addEventListener("click",function(){
+      mode=b.dataset.mml;p.querySelectorAll("[data-mml]").forEach(function(x){x.classList.toggle("active",x===b)});
+      if(cur)load()})});
+    return p}
+  function msg(html,err){var b=$id("mmlBody");if(b)b.innerHTML='<div class="mml-msg'+(err?" err":"")+'">'+html+"</div>"}
+  function askFirst(){
+    msg('<button type="button" class="btn-link" id="mmlGo"><i class="fas fa-magnifying-glass-chart"></i> Show which items drove this store\'s change</button>'+
+        '<span>— uses your Menu Mix data, takes a few seconds the first time</span>');
+    $id("mmlGo").addEventListener("click",function(){try{localStorage.setItem(AUTO,"1")}catch(e){}load()})}
+
+  function ensureFrame(){
+    frame=frame||$id("menuMixFrame");if(!frame)return false;
+    if(!frame.getAttribute("src"))frame.src=URL;
+    return true}
+  function ask(req){
+    return new Promise(function(res,rej){
+      var id="mml"+(++seq),acked=false,t0=Date.now(),timer;
+      pending[id]={res:function(d){clearInterval(timer);delete pending[id];res(d)},ack:function(){acked=true}};
+      function send(){try{frame.contentWindow&&frame.contentWindow.postMessage(Object.assign({type:"viewx-item-compare",id:id},req),O)}catch(e){}}
+      send();
+      timer=setInterval(function(){
+        if(!pending[id])return clearInterval(timer);
+        if(!frame.getAttribute("src")){clearInterval(timer);delete pending[id];return rej(Error("Menu Mix was closed"))}
+        if(!acked){if(Date.now()-t0>45000){clearInterval(timer);delete pending[id];return rej(Error("Menu Mix did not answer. It may need the v7.5 update, or you may need to sign in again."))}send()}
+        else if(Date.now()-t0>180000){clearInterval(timer);delete pending[id];rej(Error("Menu Mix took too long to load these months."))}
+      },1500)})}
+  window.addEventListener("message",function(e){
+    if(e.origin!==O||!frame||e.source!==frame.contentWindow||!e.data)return;
+    var p=pending[e.data.id];if(!p)return;
+    if(e.data.type==="viewx-item-compare-ack")p.ack();
+    else if(e.data.type==="viewx-item-compare-result")p.res(e.data)});
+
+  function load(force){
+    if(!cur)return;
+    var pm=popupMonth();if(!pm)return msg("Could not tell which month this popup shows.",true);
+    if(!ensureFrame())return msg("Menu Mix is not available on this page.",true);
+    var per=periods(pm,mode),key=cur.store+"|"+mode+"|"+per.a.from+per.a.to+per.b.from+per.b.to,mine=cur;
+    if(mine.key===key&&$id("mmlBody")&&!$id("mmlGo")&&!force)return;   // already showing (or loading) this
+    mine.key=key;
+    msg('<i class="fas fa-spinner fa-spin"></i> Loading item sales from Menu Mix…');
+    ask({store:cur.store,a:per.a,b:per.b}).then(function(d){
+      if(cur!==mine||mine.key!==key)return;              // popup moved on to another store or mode
+      if(!d.ok){mine.key="";return msg("Menu Mix: "+esc(d.error||"something went wrong"),true)}
+      render(d)
+    },function(err){if(cur===mine&&mine.key===key){mine.key="";msg(esc(err.message||err),true)}})}
+
+  function render(d){
+    var label=mode==="prev"?"previous month":"same month last year";
+    if(!d.found)return msg("Menu Mix has no item sales for this store"+(d.missing&&d.missing.length?" (months not in Menu Mix yet: "+esc(d.missing.join(", "))+")":"")+".");
+    if(!d.b.sales&&!d.b.qty)return msg("Menu Mix has item sales for "+esc(range(d.a))+" but none for the "+label+" ("+esc(range(d.b))+")"+(d.missing&&d.missing.length?" — not loaded into Menu Mix yet":"")+".");
+    var items=d.items.map(function(x){x.ds=x.sa-x.sb;x.dq=x.qa-x.qb;return x});
+    var heroes=new Set(items.slice().sort(function(a,b){return b.sb-a.sb}).slice(0,HERO).map(function(x){return x.item}));
+    var drops=items.filter(function(x){return x.ds<0}).sort(function(a,b){return a.ds-b.ds}).slice(0,TOP);
+    var gains=items.filter(function(x){return x.ds>0}).sort(function(a,b){return b.ds-a.ds}).slice(0,TOP);
+    var diff=d.a.sales-d.b.sales,head;
+    // how much of the net change the 3 biggest movers explain; above 100% means other items moved the other way
+    function explain(sum,net,word,other){var n=Math.min(3,word==="drops"?drops.length:gains.length);if(!n)return "";
+      var share=Math.round(sum/net*100),what="The "+(n===1?"biggest "+word.slice(0,-1):n+" biggest "+word);
+      return share<=100?" "+what+" make"+(n===1?"s":"")+" up <b>"+share+"%</b> of it":
+        " "+what+" add"+(n===1?"s":"")+" up to <b>"+sgn(sum)+"</b>, more than the whole change, because "+other+" in other items made up part of it"}
+    if(diff<0){var top3=drops.slice(0,3).reduce(function(s,x){return s+x.ds},0);
+      var hd=drops.filter(function(x){return heroes.has(x.item)});
+      var ex=explain(top3,diff,"drops","gains");
+      head="Item sales fell <b class='pct-down'>"+sgn(diff)+" ("+pct(d.a.sales,d.b.sales)+")</b>."+(ex?ex+".":"")+
+        (hd.length?" "+hd.length+" of the store's top "+HERO+" items fell ("+hd.slice(0,3).map(function(x){return esc(x.name)}).join(", ")+").":"");
+    }else if(diff>0){var g3=gains.slice(0,3).reduce(function(s,x){return s+x.ds},0),eg=explain(g3,diff,"gains","drops");
+      head="Item sales grew <b class='pct-up'>"+sgn(diff)+" ("+pct(d.a.sales,d.b.sales)+")</b>."+(eg?eg+".":"");
+    }else head="Item sales are flat.";
+    function rows(list){
+      if(!list.length)return '<div class="mml-empty">None</div>';
+      return "<table><thead><tr><th>Item</th><th>Then</th><th>Now</th><th>Change</th><th>Qty</th></tr></thead><tbody>"+
+        list.map(function(x){return "<tr><td>"+esc(x.name)+(heroes.has(x.item)?'<span class="mml-hero" title="One of this store\'s top '+HERO+' items in the '+label+'">TOP '+HERO+"</span>":"")+
+          (!x.sa&&x.sb?'<span class="mml-tag" title="No sales in the current period">stopped</span>':!x.sb&&x.sa?'<span class="mml-tag" title="No sales in the earlier period">new</span>':"")+
+          '<span class="mml-cat">'+esc([x.cat,x.sub].filter(function(v){return v&&v!=="Unmapped"}).join(" · ")||"")+"</span></td>"+
+          "<td>"+n0(x.sb)+"</td><td>"+n0(x.sa)+'</td><td class="'+cls(x.ds)+'">'+sgn(x.ds)+'<span class="mml-cat">'+pct(x.sa,x.sb)+'</span></td><td class="'+cls(x.dq)+'">'+sgn(x.dq)+"</td></tr>"}).join("")+"</tbody></table>"}
+    var b=$id("mmlBody");if(!b)return;
+    b.innerHTML='<div class="mml-sum">Menu Mix item sales <b>'+n0(d.a.sales)+"</b> ("+esc(range(d.a))+") vs <b>"+n0(d.b.sales)+"</b> ("+esc(range(d.b))+"). "+head+"</div>"+
+      '<div class="mml-grid"><div class="mml-card drop"><h5><i class="fas fa-arrow-trend-down"></i> Biggest drops</h5>'+rows(drops)+'</div>'+
+      '<div class="mml-card gain"><h5><i class="fas fa-arrow-trend-up"></i> Biggest gains</h5>'+rows(gains)+"</div></div>"+
+      '<div class="mml-note">Same days compared in both periods. Menu Mix totals can differ slightly from the sales figures above (packaging and unmapped stores are left out). '+
+      '<button type="button" class="btn-link" id="mmlOpen">Open Menu Mix</button></div>';
+    var o=$id("mmlOpen");o&&o.addEventListener("click",function(){var p=$id("menuMixPill");p&&p.click()})}
+
+  function hook(){
+    var orig=window.openStoreDayModal;if(typeof orig!=="function"||orig.__mml)return;
+    var wrapped=function(storeCode,area){
+      var r=orig.apply(this,arguments);
+      try{
+        if(!$id("storeDayModal").classList.contains("open"))return r;
+        if(!panel())return r;
+        var sc=String(storeCode).trim();
+        if(!cur||cur.store!==sc)cur={store:sc};          // same store again (day-of-week pills) keeps its panel
+        var auto=false;try{auto=localStorage.getItem(AUTO)==="1"}catch(e){}
+        auto?load():($id("mmlGo")||!cur.key)&&askFirst();
+      }catch(e){console.warn("Menu Mix item panel",e)}
+      return r};
+    wrapped.__mml=true;window.openStoreDayModal=wrapped}
+  function start(){hook();if(!(window.openStoreDayModal&&window.openStoreDayModal.__mml))setTimeout(start,300)}
+  document.readyState==="loading"?document.addEventListener("DOMContentLoaded",function(){setTimeout(start,0)}):start();
+  // the popup re-opens itself when its day filters change; keep the panel in step with the day range boxes
+  ["dayFrom","dayTo"].forEach(function(i){var el=$id(i);el&&el.addEventListener("change",function(){var m=$id("storeDayModal");if(cur&&m&&m.classList.contains("open")&&$id("mmlBody")&&!$id("mmlGo"))load()})});
+}();
+</script>
+
 </body>
 </html>

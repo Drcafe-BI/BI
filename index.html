@@ -2476,7 +2476,7 @@ try{Object.assign(AR_TEXT,{"Secure sign-in · two-step verification for admins":
 </script>
 
 <!-- =====================================================================
-     ADD-ON v7.7 (new code only): Waste & Mix
+     ADD-ON v7.8 (new code only): Waste & Mix
      Joins food wastage (item codes 1080… / 1089…) with Menu Mix item sales, store by store, for the
      period picked in the filters (Year, Month, Days, Weekday, Manager, Store, Segment, Format, search),
      and turns it into three short lists per store:
@@ -2514,6 +2514,22 @@ try{Object.assign(AR_TEXT,{"Secure sign-in · two-step verification for admins":
 .wm-tag{display:inline-block;font-size:.64rem;font-weight:700;padding:1px 7px;border-radius:6px;margin-top:3px;background:var(--danger-light);color:var(--danger)}
 .wm-more{background:none;border:0;color:var(--primary);font-weight:600;font-size:.78rem;cursor:pointer;padding:6px 0}
 .wm-note{font-size:.78rem;color:var(--text-muted);line-height:1.6}
+#wmStores tbody tr{cursor:pointer}#wmStores tbody tr:hover td{background:var(--surface-hover)}#wmStores td,#wmStores th{white-space:nowrap}
+#wmStores td.wm-win{white-space:normal;min-width:260px;max-width:420px;font-weight:600;font-size:.8rem}
+#wmStores .sub,#wmModal .sub{display:block;font-size:.7rem;font-weight:500;color:var(--text-light);margin-top:2px}
+.wm-warn{color:var(--warning);font-weight:600}
+.wm-verdict{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;font-size:.88rem;font-weight:600;line-height:1.5;background:var(--bg);border:1px solid var(--border);color:var(--text-main);margin-bottom:14px}
+.wm-verdict i{margin-top:3px}.wm-verdict.bad{background:var(--danger-light);border-color:transparent}.wm-verdict.bad i{color:var(--danger)}
+.wm-verdict.warn{background:var(--warning-light);border-color:transparent}.wm-verdict.warn i{color:var(--warning)}.wm-verdict.ok{background:var(--success-light);border-color:transparent}.wm-verdict.ok i{color:var(--success)}
+.wm-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}@media (max-width:720px){.wm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.wm-tiles div{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.wm-tiles span{display:block;font-size:.72rem;color:var(--text-muted)}.wm-tiles b{display:block;font-size:1.15rem;font-weight:700;color:var(--text-main);margin-top:2px}.wm-tiles em{display:block;font-style:normal;font-size:.7rem;color:var(--text-light)}
+.wm-first{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:6px}
+.wm-first h4{margin:0 0 6px;font-size:.84rem;font-weight:700;color:var(--text-main)}
+.wm-first ol{margin:0;padding-left:20px}.wm-first li{padding:8px 0;border-bottom:1px solid var(--border);font-size:.86rem;color:var(--text-main)}.wm-first li:last-child{border-bottom:none}
+.wm-first li>div{display:inline-block;width:calc(100% - 150px);vertical-align:top}.wm-first li .m{display:inline-block;width:140px;text-align:right;font-weight:700;vertical-align:top}.wm-first li .m small{display:block;font-weight:500;font-size:.68rem;color:var(--text-light)}
+.wm-detail-h{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-light);font-weight:700;margin:16px 0 0}
+#wmModal .wm-sec{padding:0}
 </style>
 <script>!function(){
 "use strict";
@@ -2628,33 +2644,63 @@ function compute(P){
       A.push(Object.assign({},base,{type:"add",groups:byAmount(add),per:add,value:pa*it.unitPrice*perMonth}))}
   });
   A=A.filter(function(a){return a.value>=1}).sort(function(a,b){return b.value-a.value});
+  // food sales by store in the period (Menu Mix categories Food and Grab & Go); older Menu Mix: linked items only
+  var fs=new Map(),fullFood=!!MM.food;
+  if(fullFood)Object.keys(MM.food).forEach(function(s){var t=0,d=MM.food[s];Object.keys(d).forEach(function(k){inP(numOf(k))&&(t+=d[k])});fs.set(code(s),t)});
+  else sold.forEach(function(v,k){var s=k.split("|")[0];fs.set(s,(fs.get(s)||0)+v.v)});
   var rows=[];S.forEach(function(s){var f=food.get(s.code);if(!f||!f.cost)return;
-    var a=A.filter(function(x){return x.store===s});
-    rows.push({s:s,cost:f.cost,pct:s.sales>0?f.cost/s.sales:null,linked:f.linked/f.cost,noMM:!mmDays.has(s.code),n:a.length,
+    var a=A.filter(function(x){return x.store===s}),fsl=fs.get(s.code)||0;
+    rows.push({s:s,cost:f.cost,food:fsl,wpct:fsl>0?f.cost/fsl:null,pct:s.sales>0?f.cost/s.sales:null,linked:f.linked/f.cost,noMM:!mmDays.has(s.code),n:a.length,acts:a,
       save:a.filter(function(x){return x.type!=="add"}).reduce(function(t,x){return t+x.value},0),
       extra:a.filter(function(x){return x.type==="add"}).reduce(function(t,x){return t+x.value},0)})});
+  // similar stores: waste % of food sales for the same format (3+ stores)
+  var fb=new Map();rows.forEach(function(r){if(!r.food)return;var k=r.s.format||"",b=fb.get(k)||{c:0,f:0,n:0};b.c+=r.cost;b.f+=r.food;b.n++;fb.set(k,b)});
+  rows.forEach(function(r){var b=fb.get(r.s.format||"");r.sim=b&&b.n>=3&&b.f>0?b.c/b.f:null});
   rows.sort(function(a,b){return b.save-a.save||b.cost-a.cost});
-  var tot={cost:0,sales:0,linked:0};rows.forEach(function(r){tot.cost+=r.cost;tot.linked+=r.linked*r.cost});S.forEach(function(s){food.has(s.code)&&(tot.sales+=s.sales)});
-  return{P:P,rows:rows,actions:A,tot:tot,unlinked:[...unl.entries()].sort(function(a,b){return b[1]-a[1]}),
+  var tot={cost:0,sales:0,linked:0,food:0,costF:0};rows.forEach(function(r){tot.cost+=r.cost;tot.linked+=r.linked*r.cost;tot.food+=r.food;r.food>0&&(tot.costF+=r.cost)});S.forEach(function(s){food.has(s.code)&&(tot.sales+=s.sales)});
+  return{P:P,rows:rows,actions:A,tot:tot,fullFood:fullFood,unlinked:[...unl.entries()].sort(function(a,b){return b[1]-a[1]}),
     save:rows.reduce(function(t,r){return t+r.save},0),extra:rows.reduce(function(t,r){return t+r.extra},0),
     weekdayOk:Math.max.apply(null,[0,1,2,3,4,5,6].map(function(wd){return[...P.days].filter(function(n){return wdOf(n)===wd}).length}))>=2}
 }
 
+/* ---------- wording: one place, used on screen, in Excel and in the PDF ---------- */
+var KIND={cut:"Make fewer",review:"Cut back",remove:"Remove",add:"Make more"};
+function kindOf(a){return a.type==="review"?(a.it.perDay<1?"remove":"review"):a.type}
+function whatOf(a){var k=kindOf(a),it=a.it;
+  if(k==="remove")return"Take it off the menu here";
+  if(k==="review")return"Make about "+Math.max(1,Math.round(it.perDay))+" a day";
+  return a.groups.map(function(g){return(g.q+(k==="add"?" more":" fewer")+" on "+dayGroups(g.wds)).replace(" on every day"," every day")}).join("; ")}
+function whyOf(a){var it=a.it,k=kindOf(a),sim=it.similar!=null?" (similar stores "+pct(it.similar)+")":"";
+  if(k==="add"){var d=0;a.per.forEach(function(q,wd){q&&(d+=it.byWd[wd].length)});return"Nothing left on "+d+" of "+d+" of those days; sells "+n1(it.perDay)+" a day"}
+  return"Sells "+n1(it.perDay)+" a day, "+pct(it.rate)+" of what is made is wasted"+sim+(it.fell?"; sales are down but the same amount is made":"")}
+function sentenceOf(a){var k=kindOf(a),it=a.it,word=k==="add"?" more":" fewer";
+  if(k==="remove")return"Take "+it.name+" off the menu here";
+  if(k==="review")return"Cut "+it.name+" back to about "+Math.max(1,Math.round(it.perDay))+" a day";
+  return"Make "+a.groups.map(function(g,i){var d=dayGroups(g.wds);return g.q+word+(i===0?" "+it.name:"")+(d==="every day"?" every day":" on "+d)}).join(" and ")}
+function moneyOf(a){return(a.type==="add"?"+":"")+money(a.value)}
+function verdict(r){
+  if(r.noMM)return{cls:"",text:"Menu Mix has no item sales for this store in this period, so waste can't be compared with sales."};
+  var w=r.wpct!=null?(r.wpct*100).toFixed(1)+"% of food sales":"",save=r.save>0?" Acting on the changes below saves about "+money(r.save)+" a month.":" No change needed on the linked items.";
+  if(r.wpct==null)return{cls:"",text:"Food waste "+money(r.cost)+"."+save};
+  if(r.sim==null)return{cls:r.wpct>=.05?"bad":"",text:"Food waste is "+w+"."+save};
+  var x=r.wpct/r.sim;
+  if(x>=1.5)return{cls:"bad",text:"Food waste is "+w+", "+x.toFixed(1)+"× similar "+(r.s.format?String(r.s.format).toLowerCase()+" ":"")+"stores ("+(r.sim*100).toFixed(1)+"%)."+save};
+  if(x>=1.1)return{cls:"warn",text:"Food waste is "+w+", above similar stores ("+(r.sim*100).toFixed(1)+"%)."+save};
+  return{cls:"ok",text:"Food waste is "+w+", in line with or better than similar stores ("+(r.sim*100).toFixed(1)+"%)."+save}}
+
 /* ---------- page ---------- */
-TAB_META.wastemix={section:"tabWasteMix",title:"Waste & Mix",sub:"Food wastage against what each store sold, for the period in the filters."};
+TAB_META.wastemix={section:"tabWasteMix",title:"Waste & Mix",sub:"Food wastage against food sales, store by store, for the period in the filters."};
 var sec=document.createElement("div");sec.className="view-section";sec.id="tabWasteMix";
 sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-scale-balanced"></i> Waste &amp; Mix<span class="right" id="wmAsOf"></span></div>'+
   '<div class="pace-kpis" id="wmKpis"></div><div id="wmState"></div></div>'+
-  '<div class="wm-grid" id="wmMain" style="display:none">'+
-   '<div class="panel" style="padding:0;overflow:hidden"><div class="panel-title" style="padding:14px 16px 0">Stores, most money to save first<span class="right"><button type="button" class="export-btn excel" id="wmExcel"><i class="fas fa-file-excel"></i> Excel</button></span></div>'+
-    '<div class="table-container" style="max-height:640px;overflow:auto"><table id="wmStores"><thead><tr><th class="left-cell">Store</th><th>Food waste</th><th>% of sales</th><th>Could save / month</th></tr></thead><tbody></tbody></table></div></div>'+
-   '<div class="panel" style="padding:0;overflow:hidden" id="wmActs"></div>'+
-  '</div>'+
-  '<div class="panel"><div class="wm-note"><b>How to read it.</b> For the period in the filters, each store\'s food wastage is set against what Menu Mix says it sold of the same item; what was made is taken as sold + wasted. '+
+  '<div class="panel" id="wmMain" style="display:none;padding:0;overflow:hidden"><div class="panel-title" style="padding:14px 16px 0">Stores, most money to save first'+
+   '<span class="right" style="display:flex;gap:8px;align-items:center"><span style="font-weight:500">Click a store for its action plan</span><button type="button" class="export-btn excel" id="wmExcel"><i class="fas fa-file-excel"></i> Excel</button></span></div>'+
+   '<div class="table-container" style="max-height:680px;overflow:auto"><table id="wmStores"><thead><tr><th class="left-cell">Store</th><th>Food sales</th><th>Food waste</th><th>Waste % of food sales</th><th>Could save / month</th><th class="left-cell">Biggest win</th><th></th></tr></thead><tbody></tbody></table></div></div>'+
+  '<div class="panel"><div class="wm-note"><b>How to read it.</b> Food sales are Menu Mix sales in the Food and Grab &amp; Go categories. Food waste is wastage of food items (codes 1080… and 1089…); milk, coffee and packaging are not included. '+
+  '<b>Similar stores</b> are stores of the same format in the current filters. Each item\'s waste is set against what the store sold of it; what was made is taken as sold + wasted. '+
   '<b>Make fewer</b>: at least that many were left over on every one of those weekdays, so making that many fewer would not have lost a sale. '+
-  '<b>Make more</b>: nothing was left on any of those weekdays while other days do have waste, so the item probably sells out. '+
-  '<b>Review</b>: 35% or more wasted, 5 or fewer sold a day, and well above similar stores. Money is per month: pieces × wastage cost per piece (or × selling price for Make more). '+
-  'Milk, coffee and packaging are not included.<div id="wmUnl" style="margin-top:8px"></div></div></div>';
+  '<b>Cut back / Remove</b>: 35% or more wasted, 5 or fewer sold a day, and well above similar stores (Remove when it sells less than 1 a day). '+
+  '<b>Make more</b>: nothing left on any of those weekdays while other days do have waste, so it probably sells out. Money is per month.<div id="wmUnl" style="margin-top:8px"></div></div></div>';
 var anchor=document.getElementById("tabAlerts")||document.getElementById("tabWastage");anchor?anchor.after(sec):document.querySelector(".dashboard").appendChild(sec);
 var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="wastemix";nb.title="Waste & Mix";
 nb.innerHTML='<i class="fas fa-scale-balanced"></i><span class="nav-label">Waste &amp; Mix</span>';
@@ -2662,55 +2708,78 @@ var ab=document.querySelector('.tab-btn[data-tab="wastage"]');ab?ab.after(nb):do
 nb.addEventListener("click",function(){switchTab("wastemix")});
 try{Object.assign(AR_TEXT,{"Waste & Mix":"الهدر والمبيعات"})}catch(e){}
 
+// store action plan popup
+var md=document.createElement("div");md.className="modal-overlay";md.id="wmModal";
+md.innerHTML='<div class="modal-box" style="max-width:1120px"><div class="modal-head"><div><h3><i class="fas fa-scale-balanced"></i> <span id="wmMTitle">Store</span></h3><div class="sub" id="wmMSub"></div></div>'+
+  '<div class="modal-tools"><button class="export-btn excel" id="wmMExcel" type="button"><i class="fas fa-file-excel"></i> Excel</button><button class="export-btn pdf" id="wmMPdf" type="button"><i class="fas fa-file-pdf"></i> PDF</button>'+
+  '<button class="modal-close" id="wmMClose" type="button" aria-label="Close"><i class="fas fa-times"></i></button></div></div><div class="modal-body" id="wmMBody" style="padding:18px 20px"></div></div>';
+document.body.appendChild(md);
+var cur=null;
+function closeM(){md.classList.remove("open");cur=null}
+document.getElementById("wmMClose").addEventListener("click",closeM);
+md.addEventListener("click",function(e){e.target===md&&closeM()});
+document.addEventListener("keydown",function(e){e.key==="Escape"&&md.classList.contains("open")&&closeM()});
+
 function kpi(k,v,s,cls){return'<div class="pace-kpi"><div class="k">'+k+'</div><div class="v '+(cls||"")+'">'+v+'</div><div class="s">'+(s||"&nbsp;")+"</div></div>"}
 function state(html,isErr){document.getElementById("wmState").innerHTML=html?'<div class="wm-msg'+(isErr?" err":"")+'">'+html+"</div>":"";document.getElementById("wmMain").style.display=html?"none":""}
-function itemCell(a){var it=a.it;
-  return esc(it.name)+'<span class="sub">'+n1(it.perDay)+" sold a day</span>"+(it.fell?'<span class="wm-tag" title="Sales fell 25% or more in the second half of the period, but sold + wasted stayed about the same">Sales down, still making the same</span>':"")}
-function rateCell(it){return'<span class="'+(it.rate>=.2?"pct-down":"")+'">'+pct(it.rate)+"</span>"+(it.similar!=null?'<span class="sub">similar stores '+pct(it.similar)+"</span>":"")}
-function groupsCell(a,word){return a.groups.map(function(g){return g.q+" "+word+" on "+dayGroups(g.wds)}).join("<br>").replace(/ on every day/g," every day")}
+function wpctCell(r){if(r.wpct==null)return"—";var x=r.sim?r.wpct/r.sim:null,c=x!=null&&x>=1.5?"pct-down":x!=null&&x>=1.1?"wm-warn":"";
+  return'<span class="'+c+'">'+(r.wpct*100).toFixed(1)+"%</span>"+(r.sim!=null?'<span class="sub">similar '+(r.sim*100).toFixed(1)+"%</span>":"")}
+function itemCell(a){var it=a.it;return esc(it.name)+'<span class="sub">'+n1(it.perDay)+" sold a day</span>"+(it.fell?'<span class="wm-tag" title="Sales fell 25% or more in the second half of the period, but sold + wasted stayed about the same">Sales down, same amount made</span>':"")}
+function rateCell(it){return'<span class="'+(it.rate>=.2?"pct-down":"")+'">'+pct(it.rate)+"</span>"+(it.similar!=null?'<span class="sub">similar '+pct(it.similar)+"</span>":"")}
 function section(key,title,hint,color,head,list,row,totLabel){
   if(!list.length)return"";
   var all=open[key],shown=all?list:list.slice(0,SHOW),tot=list.reduce(function(t,a){return t+a.value},0);
   return'<div class="wm-sec"><h4><span class="dot" style="background:var(--'+color+')"></span>'+title+' <span class="hint">'+hint+'</span><span class="tot" style="color:var(--'+color+')">'+totLabel+" "+money(tot)+"</span></h4>"+
     '<table class="wm-tbl"><colgroup><col style="width:34%"><col style="width:32%"><col style="width:15%"><col style="width:19%"></colgroup><thead><tr>'+head.map(function(h){return"<th>"+h+"</th>"}).join("")+"</tr></thead><tbody>"+shown.map(row).join("")+"</tbody></table>"+
     (list.length>SHOW?'<button type="button" class="wm-more" data-more="'+key+'">'+(all?"Show fewer":"Show all "+list.length)+"</button>":"")+"</div>"}
-function renderActs(){
-  var box=document.getElementById("wmActs");
-  var r=R.rows.find(function(x){return x.s.code===sel})||R.rows[0];
-  if(!r){box.innerHTML='<div class="wm-msg">No food wastage for the stores in the current filters.</div>';return}
-  sel=r.s.code;document.querySelectorAll("#wmStores tr[data-c]").forEach(function(tr){tr.classList.toggle("sel",tr.dataset.c===sel)});
-  var head='<div class="wm-head"><div class="wm-store">'+esc(r.s.name)+(r.s.area?' <span style="font-weight:500;color:var(--text-light);font-size:.82rem">· '+esc(r.s.area)+"</span>":"")+"</div>"+
-    '<div class="wm-sum"><span>Food waste <b>'+money(r.cost)+"</b></span><span><b>"+(r.pct!=null?(r.pct*100).toFixed(1)+"%":"—")+"</b> of sales</span>"+
-    (r.noMM?"":"<span>Could save <b style=\"color:var(--danger)\">"+money(r.save)+"</b> a month</span>"+(r.extra?"<span>Possible extra sales <b style=\"color:var(--success)\">"+money(r.extra)+"</b> a month</span>":""))+"</div></div>";
-  if(r.noMM){box.innerHTML=head+'<div class="wm-msg">Menu Mix has no item sales for this store in this period, so waste can\'t be compared with sales.</div>';return}
-  var a=R.actions.filter(function(x){return x.store===r.s});
-  var cut=a.filter(function(x){return x.type==="cut"}),add=a.filter(function(x){return x.type==="add"}),rev=a.filter(function(x){return x.type==="review"});
-  var body=
+function openStore(c){
+  var r=R&&R.rows.find(function(x){return x.s.code===c});if(!r)return;cur=r;
+  document.getElementById("wmMTitle").textContent=r.s.name;
+  document.getElementById("wmMSub").textContent="Waste & Mix action plan · "+labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"+(r.s.area?" · Manager: "+r.s.area:"")+(r.s.format?" · Format: "+r.s.format:"");
+  renderModal();md.classList.add("open")}
+function renderModal(){
+  var r=cur;if(!r)return;var v=verdict(r),a=r.acts;
+  var tiles='<div class="wm-tiles">'+
+    '<div><span>Food sales</span><b>'+money(r.food)+"</b><em>"+(R.fullFood?"Food + Grab &amp; Go":"linked items only")+"</em></div>"+
+    '<div><span>Food waste</span><b>'+money(r.cost)+"</b><em>"+(r.wpct!=null?(r.wpct*100).toFixed(1)+"% of food sales":"")+(r.sim!=null?" · similar "+(r.sim*100).toFixed(1)+"%":"")+"</em></div>"+
+    '<div><span>Could save</span><b style="color:var(--danger)">'+money(r.save)+"</b><em>a month</em></div>"+
+    '<div><span>Possible extra sales</span><b style="color:var(--success)">'+money(r.extra)+"</b><em>a month</em></div></div>";
+  var head='<div class="wm-verdict '+v.cls+'"><i class="fas '+(v.cls==="bad"?"fa-circle-exclamation":v.cls==="warn"?"fa-triangle-exclamation":"fa-circle-check")+'"></i><div>'+esc(v.text)+"</div></div>"+tiles;
+  if(r.noMM){document.getElementById("wmMBody").innerHTML=head;return}
+  var top=a.slice(0,3);
+  var first=top.length?'<div class="wm-first"><h4>Do these first</h4><ol>'+top.map(function(x){
+      return"<li><div><b>"+esc(sentenceOf(x))+'</b><span class="sub">'+esc(whyOf(x))+'</span></div><span class="m" style="color:var(--'+(x.type==="add"?"success":"danger")+')">'+moneyOf(x)+"<small>"+(x.type==="add"?"sales / month":"saved / month")+"</small></span></li>"}).join("")+"</ol></div>":
+    '<div class="wm-msg">'+(R.weekdayOk?"Nothing to change at this store for this period. Waste on the linked items is low or not regular enough to act on.":"Pick a period with at least 2 of each weekday (about 2 weeks) to get day-by-day suggestions.")+"</div>";
+  var cut=a.filter(function(x){return x.type==="cut"}),rev=a.filter(function(x){return x.type==="review"}),add=a.filter(function(x){return x.type==="add"});
+  var detail=
     section("cut","Make fewer","left over every time","danger",["Item","Make","Waste rate","Saves / month"],cut,function(x){
-      return"<tr><td>"+itemCell(x)+'</td><td class="what">'+groupsCell(x,"fewer")+"</td><td>"+rateCell(x.it)+'</td><td style="font-weight:700">'+money(x.value)+"</td></tr>"},"Total")+
-    section("review","Review","low sellers with high waste","warning",["Item","Suggestion","Waste rate","Waste / month"],rev,function(x){
-      var keep=Math.max(1,Math.round(x.it.perDay));
-      return"<tr><td>"+itemCell(x)+'</td><td class="what">Make about '+keep+" a day<span class=\"sub\">or take it off the menu here</span></td><td>"+rateCell(x.it)+'</td><td style="font-weight:700">'+money(x.value)+"</td></tr>"},"Total")+
+      return"<tr><td>"+itemCell(x)+'</td><td class="what">'+esc(whatOf(x)).replace(/; /g,"<br>")+"</td><td>"+rateCell(x.it)+'</td><td style="font-weight:700">'+money(x.value)+"</td></tr>"},"Total")+
+    section("review","Cut back or remove","low sellers with high waste","warning",["Item","Do","Waste rate","Saves / month"],rev,function(x){
+      var k=kindOf(x);return"<tr><td>"+itemCell(x)+'</td><td class="what">'+esc(whatOf(x))+'<span class="sub">'+(k==="remove"?"sells less than 1 a day":"or take it off the menu here")+"</span></td><td>"+rateCell(x.it)+'</td><td style="font-weight:700">'+money(x.value)+"</td></tr>"},"Total")+
     section("add","Make more","may be selling out","success",["Item","Make","Sold out","Extra sales / month"],add,function(x){
-      var d=0,t=0;x.per.forEach(function(q,wd){if(q){t+=x.it.byWd[wd].length;d+=x.it.byWd[wd].length}});
-      return"<tr><td>"+itemCell(x)+'</td><td class="what">'+groupsCell(x,"more")+"</td><td>"+d+" of "+t+'</td><td style="font-weight:700;color:var(--success)">+'+money(x.value)+"</td></tr>"},"Total +");
-  box.innerHTML=head+(body||'<div class="wm-msg">'+(R.weekdayOk?"Nothing to change at this store for this period. Waste is low or not regular enough to act on.":"Pick a period with at least 2 of each weekday (about 2 weeks) to get day-by-day suggestions.")+"</div>")}
+      var d=0;x.per.forEach(function(q,wd){q&&(d+=x.it.byWd[wd].length)});
+      return"<tr><td>"+itemCell(x)+'</td><td class="what">'+esc(whatOf(x)).replace(/; /g,"<br>")+"</td><td>"+d+" of "+d+' days</td><td style="font-weight:700;color:var(--success)">+'+money(x.value)+"</td></tr>"},"Total +");
+  document.getElementById("wmMBody").innerHTML=head+first+(detail?'<div class="wm-detail-h">All changes</div>'+detail:"")}
+document.getElementById("wmMBody").addEventListener("click",function(e){var b=e.target.closest("[data-more]");b&&(open[b.dataset.more]=!open[b.dataset.more],renderModal())});
+
 function render(){
   if(!R)return;var P=R.P;
   document.getElementById("wmAsOf").textContent=labelRange(P.from,P.to)+" · "+P.n+" days";
   var cov=R.tot.cost>0?R.tot.linked/R.tot.cost:0,nc=R.actions.filter(function(x){return x.type!=="add"}).length,na=R.actions.filter(function(x){return x.type==="add"}).length;
-  document.getElementById("wmKpis").innerHTML=kpi("Food waste",money(R.tot.cost),R.tot.sales>0?(R.tot.cost/R.tot.sales*100).toFixed(2)+"% of sales in this period":"","")+
+  document.getElementById("wmKpis").innerHTML=kpi("Food sales",money(R.tot.food),R.fullFood?"Food + Grab & Go, Menu Mix":"linked items only (update Menu Mix for all food)","")+
+    kpi("Food waste",money(R.tot.cost),R.tot.food>0?(R.tot.costF/R.tot.food*100).toFixed(1)+"% of food sales"+(R.tot.costF<R.tot.cost?" (stores with Menu Mix)":""):"","")+
     kpi("Could be saved",money(R.save),"a month, from "+nc+" changes","bad")+
-    kpi("Possible extra sales",money(R.extra),"a month, "+na+(na===1?" item":" items")+" may sell out","good")+
-    kpi("Waste linked to Menu Mix",pct(cov),"of food waste cost",cov<.8?"warn":"");
+    kpi("Possible extra sales",money(R.extra),"a month, "+na+(na===1?" item":" items")+" may sell out","good");
   if(!R.rows.length){state("No food wastage for the stores in the current filters in this period.");return}
   state("");
-  document.querySelector("#wmStores tbody").innerHTML=R.rows.map(function(r){
-    return'<tr data-c="'+esc(r.s.code)+'"><td class="left-cell">'+esc(r.s.name)+'<div style="font-size:.7rem;color:var(--text-light)">'+esc(r.s.area||"")+"</div></td><td>"+money(r.cost)+"</td>"+
-      '<td class="'+(r.pct!=null&&r.pct>=.03?"pct-down":"")+'">'+(r.pct!=null?(r.pct*100).toFixed(1)+"%":"—")+"</td><td>"+(r.noMM?'<span style="color:var(--text-light)">no Menu Mix</span>':'<b>'+money(r.save)+"</b>")+"</td></tr>"}).join("");
+  document.querySelector("#wmStores tbody").innerHTML=R.rows.map(function(r){var b=r.acts[0];
+    return'<tr data-c="'+esc(r.s.code)+'"><td class="left-cell">'+esc(r.s.name)+'<span class="sub">'+esc(r.s.area||"")+"</span></td><td>"+(r.food?money(r.food):"—")+"</td><td>"+money(r.cost)+"</td>"+
+      "<td>"+wpctCell(r)+"</td><td>"+(r.noMM?'<span class="sub" style="margin:0">no Menu Mix</span>':"<b>"+money(r.save)+"</b>")+'</td>'+
+      '<td class="left-cell wm-win">'+(b?esc(sentenceOf(b))+'<span class="sub">'+moneyOf(b)+(b.type==="add"?" sales":"")+" a month"+(r.acts.length>1?" · "+(r.acts.length-1)+" more":"")+"</span>":'<span class="sub" style="margin:0">—</span>')+"</td>"+
+      '<td><i class="fas fa-chevron-right" style="color:var(--text-light)"></i></td></tr>'}).join("");
   var u=R.unlinked.slice(0,6);
-  document.getElementById("wmUnl").innerHTML=u.length?"<b>Not linked to Menu Mix yet</b> (add them to the item map to include them): "+u.map(function(x){return esc(x[0])+" ("+money(x[1])+")"}).join(", ")+(R.unlinked.length>6?" and "+(R.unlinked.length-6)+" more.":"."):"";
-  renderActs()}
+  document.getElementById("wmUnl").innerHTML=(R.tot.cost?"<b>Linked to Menu Mix:</b> "+pct(cov)+" of food waste cost. ":"")+(u.length?"<b>Not linked yet</b> (add them to the item map to include them): "+u.map(function(x){return esc(x[0])+" ("+money(x[1])+")"}).join(", ")+(R.unlinked.length>6?" and "+(R.unlinked.length-6)+" more.":"."):"");
+  cur&&md.classList.contains("open")&&(cur=R.rows.find(function(x){return x.s.code===cur.s.code})||null,cur?renderModal():closeM())}
 async function load(){
   if(loading)return loading;
   loading=(async function(){
@@ -2722,13 +2791,12 @@ async function load(){
         for(var i=0;i<60&&!(window.__wastageData||[]).length;i++)await new Promise(function(r){setTimeout(r,500)});
         if(!(window.__wastageData||[]).length){R=null;return state("No wastage data loaded. Open the Wastage tab or upload the wastage file first.")}}
       var P=period();if(!P){R=null;document.getElementById("wmKpis").innerHTML="";return state("No sales in the current filters. Change the Year, Month or Days filter.")}
-      var key=P.from+"|"+P.to;
       if(!MM||!(MM.from<=P.from&&MM.to>=P.to)){
         state('<i class="fas fa-spinner fa-spin"></i> Loading item sales from Menu Mix for '+labelRange(P.from,P.to)+"…");
         var items=[...new Set(Object.keys(WASTE_MM_MAP).map(function(k){return WASTE_MM_MAP[k]}))];
         var d=await askDaily({from:isoOf(P.from),to:isoOf(P.to),items:items});
         if(!d.ok)throw Error("Menu Mix: "+(d.error||"something went wrong"));
-        d.from=P.from;d.to=P.to;MM=d;MMkey=key}
+        d.from=P.from;d.to=P.to;MM=d}
       R=compute(P);render();
     }catch(e){console.error("Waste & Mix",e);R=null;state(esc(e.message||e),!0)}
   })();
@@ -2736,17 +2804,44 @@ async function load(){
 var again=!1;
 function refresh(){if(!sec.classList.contains("active"))return;if(loading){again=!0;return}
   load().then(function(){if(again){again=!1;refresh()}})}
-document.querySelector("#wmStores tbody").addEventListener("click",function(e){var tr=e.target.closest("tr[data-c]");tr&&(sel=tr.dataset.c,open={},renderActs())});
-document.getElementById("wmActs").addEventListener("click",function(e){var b=e.target.closest("[data-more]");b&&(open[b.dataset.more]=!open[b.dataset.more],renderActs())});
-document.getElementById("wmExcel").addEventListener("click",function(){
-  if(!R||!R.actions.length)return void showToast("Nothing to export","info");if(typeof librariesReady==="function"&&!librariesReady())return;
+document.querySelector("#wmStores tbody").addEventListener("click",function(e){var tr=e.target.closest("tr[data-c]");tr&&(open={},openStore(tr.dataset.c))});
+
+/* ---------- downloads ---------- */
+var ACT_HEAD=["#","Action","Item","What to do","Why","Money / month"];
+function actRows(r){return r.acts.map(function(a,i){return[i+1,KIND[kindOf(a)],a.it.name,whatOf(a),whyOf(a),moneyOf(a)+(a.type==="add"?" sales":" saved")]})}
+function summaryLines(r){var v=verdict(r);return[
+  ["Store",r.s.name],["Manager",r.s.area||""],["Format",r.s.format||""],["Period",labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"],
+  ["Food sales",Math.round(r.food)],["Food waste",Math.round(r.cost)],["Waste % of food sales",r.wpct!=null?(r.wpct*100).toFixed(1)+"%":""],
+  ["Similar stores",r.sim!=null?(r.sim*100).toFixed(1)+"%":""],["Could save / month",Math.round(r.save)],["Possible extra sales / month",Math.round(r.extra)],["Summary",v.text]]}
+var fileName=function(r,ext){return"Waste_Mix_"+String(r.s.name).replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"")+"_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+"."+ext};
+document.getElementById("wmMExcel").addEventListener("click",function(){
+  var r=cur;if(!r)return;if(typeof librariesReady==="function"&&!librariesReady())return;
   var self=this,go=async function(){
-    var aoa=[["Store","Manager","Action","Item","What to do","Sold a day","Waste rate","Similar stores","Sales down, same made","Money / month"]];
-    R.actions.forEach(function(a){var it=a.it,what=a.type==="review"?"Make about "+Math.max(1,Math.round(it.perDay))+" a day, or take it off the menu here":
-      a.groups.map(function(g){return(g.q+(a.type==="add"?" more":" fewer")+" on "+dayGroups(g.wds)).replace(" on every day"," every day")}).join("; ");
-      aoa.push([a.store.name,a.store.area||"",{cut:"Make fewer",add:"Make more",review:"Review"}[a.type],it.name,what,Math.round(it.perDay*10)/10,
-        Math.round(it.rate*100)+"%",it.similar!=null?Math.round(it.similar*100)+"%":"",it.fell?"Yes":"",Math.round(a.value)])});
-    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(aoa,{cols:[28,16,12,28,44,10,10,12,12,13]}),"Waste & Mix");
+    var aoa=summaryLines(r).concat([[],ACT_HEAD]).concat(actRows(r));
+    var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,makeSheet(aoa,{cols:[22,14,30,34,70,18]}),"Action plan");
+    await downloadWorkbook(wb,fileName(r,"xlsx"));showToast("Excel exported","success")};
+  typeof guardBusy==="function"?guardBusy(self,"Exporting…",go):go()});
+document.getElementById("wmMPdf").addEventListener("click",function(){
+  var r=cur;if(!r)return;if(typeof tablePdfReady==="function"&&!tablePdfReady())return;
+  if(!r.acts.length)return void showToast("No actions to put in the PDF for this store","info");
+  var t=document.createElement("table"),v=verdict(r);
+  t.innerHTML="<thead><tr>"+ACT_HEAD.map(function(h){return"<th>"+esc(h)+"</th>"}).join("")+"</tr></thead><tbody>"+
+    actRows(r).map(function(x){return"<tr>"+x.map(function(c){return"<td>"+esc(c)+"</td>"}).join("")+"</tr>"}).join("")+"</tbody>";
+  var self=this,go=function(){downloadTablePdf({tableEl:t,title:"Waste & Mix action plan - "+r.s.name,
+    subtitle:labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"+(r.s.area?" - Manager: "+r.s.area:"")+" - Food sales "+n0(r.food)+" - Food waste "+n0(r.cost)+" - "+v.text,
+    filename:fileName(r,"pdf")});showToast("PDF downloaded","success")};
+  typeof guardBusy==="function"?guardBusy(self,"Generating PDF…",go):go()});
+document.getElementById("wmExcel").addEventListener("click",function(){
+  if(!R||!R.rows.length)return void showToast("Nothing to export","info");if(typeof librariesReady==="function"&&!librariesReady())return;
+  var self=this,go=async function(){
+    var s=[["Store","Manager","Format","Food sales","Food waste","Waste % of food sales","Similar stores","Could save / month","Possible extra sales / month","Biggest win"]];
+    R.rows.forEach(function(r){var b=r.acts[0];s.push([r.s.name,r.s.area||"",r.s.format||"",Math.round(r.food),Math.round(r.cost),r.wpct!=null?(r.wpct*100).toFixed(1)+"%":"",
+      r.sim!=null?(r.sim*100).toFixed(1)+"%":"",Math.round(r.save),Math.round(r.extra),b?sentenceOf(b):""])});
+    var a=[["Store","Manager","Action","Item","What to do","Why","Money / month"]];
+    R.rows.forEach(function(r){r.acts.forEach(function(x){a.push([r.s.name,r.s.area||"",KIND[kindOf(x)],x.it.name,whatOf(x),whyOf(x),Math.round(x.value)])})});
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,makeSheet(s,{cols:[30,16,18,12,12,12,12,14,14,50]}),"Stores");
+    XLSX.utils.book_append_sheet(wb,makeSheet(a,{cols:[30,16,12,28,34,70,12]}),"Actions");
     await downloadWorkbook(wb,"Waste_and_Mix_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+".xlsx");showToast("Excel exported","success")};
   typeof guardBusy==="function"?guardBusy(self,"Exporting…",go):go()});
 var t=null;function soon(){clearTimeout(t);t=setTimeout(refresh,80)}

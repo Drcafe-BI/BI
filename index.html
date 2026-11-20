@@ -2476,7 +2476,7 @@ try{Object.assign(AR_TEXT,{"Secure sign-in · two-step verification for admins":
 </script>
 
 <!-- =====================================================================
-     ADD-ON v8.0 (new code only): Waste & Mix
+     ADD-ON v8.0 (new code only): Waste vs Food Sales
      Joins food wastage (item codes 1080… / 1089…) with Menu Mix item sales, store by store, for the
      period picked in the filters (Year, Month, Days, Weekday, Manager, Store, Segment, Format, search),
      and turns it into three short lists per store:
@@ -2689,9 +2689,9 @@ function verdict(r){
   return{cls:"ok",text:"Food waste is "+w+", in line with or better than similar stores ("+(r.sim*100).toFixed(1)+"%)."+save}}
 
 /* ---------- page ---------- */
-TAB_META.wastemix={section:"tabWasteMix",title:"Waste & Mix",sub:"Food wastage against food sales, store by store, for the period in the filters."};
+TAB_META.wastemix={section:"tabWasteMix",title:"Waste vs Food Sales",sub:"Food wastage against food sales, store by store, for the period in the filters."};
 var sec=document.createElement("div");sec.className="view-section";sec.id="tabWasteMix";
-sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-scale-balanced"></i> Waste &amp; Mix<span class="right" id="wmAsOf"></span></div>'+
+sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-scale-balanced"></i> Waste vs Food Sales<span class="right" id="wmAsOf"></span></div>'+
   '<div class="pace-kpis" id="wmKpis"></div><div id="wmState"></div></div>'+
   '<div class="panel" id="wmMain" style="display:none;padding:0;overflow:hidden"><div class="panel-title" style="padding:14px 16px 0">Stores, most money to save first'+
    '<span class="right" style="display:flex;gap:8px;align-items:center"><span style="font-weight:500">Click a store for its action plan</span><button type="button" class="export-btn excel" id="wmExcel"><i class="fas fa-file-excel"></i> Excel</button></span></div>'+
@@ -2702,11 +2702,11 @@ sec.innerHTML='<div class="panel"><div class="panel-title"><i class="fas fa-scal
   '<b>Reduce ordering / Check ordering</b>: 35% or more wasted, 5 or fewer sold a day, and well above similar stores. Check ordering means it sells less than 1 a day, so order it only when needed. '+
   '<b>Order more</b>: nothing left on any of those weekdays while other days do have waste, so it probably sells out. Money is per month.<div id="wmUnl" style="margin-top:8px"></div></div></div>';
 var anchor=document.getElementById("tabAlerts")||document.getElementById("tabWastage");anchor?anchor.after(sec):document.querySelector(".dashboard").appendChild(sec);
-var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="wastemix";nb.title="Waste & Mix";
-nb.innerHTML='<i class="fas fa-scale-balanced"></i><span class="nav-label">Waste &amp; Mix</span>';
+var nb=document.createElement("button");nb.className="tab-btn";nb.dataset.tab="wastemix";nb.title="Waste vs Food Sales";
+nb.innerHTML='<i class="fas fa-scale-balanced"></i><span class="nav-label">Waste vs Food Sales</span>';
 var ab=document.querySelector('.tab-btn[data-tab="wastage"]');ab?ab.after(nb):document.querySelector(".sidebar-nav").appendChild(nb);
 nb.addEventListener("click",function(){switchTab("wastemix")});
-try{Object.assign(AR_TEXT,{"Waste & Mix":"الهدر والمبيعات"})}catch(e){}
+try{Object.assign(AR_TEXT,{"Waste vs Food Sales":"الهدر مقابل مبيعات الطعام"})}catch(e){}
 
 // store action plan popup
 var md=document.createElement("div");md.className="modal-overlay";md.id="wmModal";
@@ -2735,7 +2735,7 @@ function section(key,title,hint,color,head,list,row,totLabel){
 function openStore(c){
   var r=R&&R.rows.find(function(x){return x.s.code===c});if(!r)return;cur=r;
   document.getElementById("wmMTitle").textContent=r.s.name;
-  document.getElementById("wmMSub").textContent="Waste & Mix action plan · "+labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"+(r.s.area?" · Manager: "+r.s.area:"")+(r.s.format?" · Format: "+r.s.format:"");
+  document.getElementById("wmMSub").textContent="Waste vs Food Sales action plan · "+labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"+(r.s.area?" · Manager: "+r.s.area:"")+(r.s.format?" · Format: "+r.s.format:"");
   renderModal();md.classList.add("open")}
 function renderModal(){
   var r=cur;if(!r)return;var v=verdict(r),a=r.acts;
@@ -2813,7 +2813,7 @@ function summaryLines(r){var v=verdict(r);return[
   ["Store",r.s.name],["Manager",r.s.area||""],["Format",r.s.format||""],["Period",labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"],
   ["Food sales",Math.round(r.food)],["Food waste",Math.round(r.cost)],["Waste % of food sales",r.wpct!=null?(r.wpct*100).toFixed(1)+"%":""],
   ["Similar stores",r.sim!=null?(r.sim*100).toFixed(1)+"%":""],["Could save / month",Math.round(r.save)],["Possible extra sales / month",Math.round(r.extra)],["Summary",v.text]]}
-var fileName=function(r,ext){return"Waste_Mix_"+String(r.s.name).replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"")+"_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+"."+ext};
+var fileName=function(r,ext){return"Waste_vs_Food_Sales_"+String(r.s.name).replace(/[^a-z0-9]+/gi,"_").replace(/^_|_$/g,"")+"_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+"."+ext};
 document.getElementById("wmMExcel").addEventListener("click",function(){
   var r=cur;if(!r)return;if(typeof librariesReady==="function"&&!librariesReady())return;
   var self=this,go=async function(){
@@ -2827,7 +2827,7 @@ document.getElementById("wmMPdf").addEventListener("click",function(){
   var t=document.createElement("table"),v=verdict(r);
   t.innerHTML="<thead><tr>"+ACT_HEAD.map(function(h){return"<th>"+esc(h)+"</th>"}).join("")+"</tr></thead><tbody>"+
     actRows(r).map(function(x){return"<tr>"+x.map(function(c){return"<td>"+esc(c)+"</td>"}).join("")+"</tr>"}).join("")+"</tbody>";
-  var self=this,go=function(){downloadTablePdf({tableEl:t,title:"Waste & Mix action plan - "+r.s.name,
+  var self=this,go=function(){downloadTablePdf({tableEl:t,title:"Waste vs Food Sales action plan - "+r.s.name,
     subtitle:labelRange(R.P.from,R.P.to)+" ("+R.P.n+" days)"+(r.s.area?" - Manager: "+r.s.area:"")+" - Food sales "+n0(r.food)+" - Food waste "+n0(r.cost)+" - "+v.text,
     filename:fileName(r,"pdf")});showToast("PDF downloaded","success")};
   typeof guardBusy==="function"?guardBusy(self,"Generating PDF…",go):go()});
@@ -2842,11 +2842,197 @@ document.getElementById("wmExcel").addEventListener("click",function(){
     var wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,makeSheet(s,{cols:[30,16,18,12,12,12,12,14,14,50]}),"Stores");
     XLSX.utils.book_append_sheet(wb,makeSheet(a,{cols:[30,16,12,28,34,70,12]}),"Actions");
-    await downloadWorkbook(wb,"Waste_and_Mix_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+".xlsx");showToast("Excel exported","success")};
+    await downloadWorkbook(wb,"Waste_vs_Food_Sales_"+isoOf(R.P.from)+"_to_"+isoOf(R.P.to)+".xlsx");showToast("Excel exported","success")};
   typeof guardBusy==="function"?guardBusy(self,"Exporting…",go):go()});
 var t=null;function soon(){clearTimeout(t);t=setTimeout(refresh,80)}
 document.addEventListener("dashboard:filtered",soon);
 new MutationObserver(function(){sec.classList.contains("active")&&refresh()}).observe(sec,{attributes:!0,attributeFilter:["class"]});
+}();</script>
+
+<!-- =====================================================================
+     ADD-ON v8.1 (new code only): navigation groups, module access by role, Menu Mix theme
+     1. Sidebar in collapsible groups: Overview, Sales, Wastage, Product Mix, Projection & Alerts.
+        Manager report moves from the Actions menu into Projection & Alerts. The Menu Mix button
+        in the top bar is removed (Menu Mix is under Product Mix; Alt+S still works).
+     2. Module access: admins choose which roles see Sales, Wastage, Product Mix and
+        Projection & Alerts (Actions > Module access). Saved in site_settings.module_access
+        (needs "Module access setup.sql" run once in Supabase). Admins always see everything.
+        This hides pages in the dashboard; what data a person can read is still set by the database.
+     3. The Menu Mix window gets the dashboard's theme colours (light, dark, emerald).
+     ===================================================================== -->
+<style>
+#menuMixPill{display:none!important}
+.nav-group{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.nav-gh{width:100%;display:flex;align-items:center;gap:12px;padding:8px 12px;border:0;background:transparent;border-radius:8px;cursor:pointer;
+  color:var(--sb-text);font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;text-align:start;white-space:nowrap}
+.nav-gh:hover{background:var(--sb-hover);color:var(--sb-text-hover)}
+.nav-gh .gi{width:16px;text-align:center;font-size:.8rem;opacity:.8}
+.nav-gh .chev{margin-inline-start:auto;font-size:.65rem;transition:transform .18s var(--ease)}
+.nav-group.closed .nav-gh .chev{transform:rotate(-90deg)}
+.nav-gh .gh-badge{margin-inline-start:auto;display:none}
+.nav-group.closed .nav-gh .gh-badge.on{display:inline-flex}
+.nav-group.closed .nav-gh .gh-badge.on+.chev{margin-inline-start:6px}
+.nav-gi{display:flex;flex-direction:column;gap:2px;padding-inline-start:10px;border-inline-start:1px solid var(--sb-border);margin-inline-start:19px}
+.nav-group.closed .nav-gi{display:none}
+.nav-gi .tab-btn{padding-block:7px}
+.nav-group.has-active .nav-gh{color:var(--sb-text-hover)}
+html.sb-collapsed .nav-gh{display:none}
+html.sb-collapsed .nav-gi{display:flex!important;padding:0;margin:0;border:0;border-top:1px solid var(--sb-border);padding-top:4px}
+.vx-hidden{display:none!important}
+html.vx-no-mm #mmLink{display:none!important}
+#maOverlay .dialog-box{max-width:640px}
+#maTable{width:100%;border-collapse:collapse;font-size:.82rem;margin:10px 0 4px}
+#maTable th,#maTable td{padding:9px 8px;border-bottom:1px solid var(--border);text-align:center}
+#maTable th{font-size:.7rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+#maTable td:first-child,#maTable th:first-child{text-align:start}
+#maTable td:first-child b{display:block;color:var(--text-main)}
+#maTable td:first-child small{color:var(--text-light);font-size:.72rem}
+#maTable input{width:17px;height:17px;accent-color:var(--primary);cursor:pointer}
+#maTable input:disabled{cursor:not-allowed;opacity:.6}
+</style>
+<script>!function(){
+"use strict";
+if(window.self!==window.top)return;
+var MM_ORIGIN="https://drcafe-bi.github.io";
+var $=function(id){return document.getElementById(id)};
+var nav=document.querySelector(".sidebar-nav");if(!nav)return;
+var tabBtn=function(t){return nav.querySelector('.tab-btn[data-tab="'+t+'"]')};
+
+/* ---------- 1. groups ---------- */
+var GROUPS=[
+  {id:"sales",label:"Sales",icon:"fa-chart-column",tabs:["table","formatam","yoy","leaderboard","heatmap","insights"]},
+  {id:"wastage",label:"Wastage",icon:"fa-dumpster",tabs:["wastage","wastemix"]},
+  {id:"productmix",label:"Product Mix",icon:"fa-utensils",extra:function(){return[nav.querySelector(".menu-mix-btn")]}},
+  {id:"projection",label:"Projection & Alerts",icon:"fa-bullseye",tabs:["pace","lypace","alerts"],extra:function(){return[mgrNav()]}}
+];
+var OPEN_KEY="vx-nav-open",openState={};try{openState=JSON.parse(localStorage.getItem(OPEN_KEY)||"{}")||{}}catch(e){}
+function saveOpen(){try{localStorage.setItem(OPEN_KEY,JSON.stringify(openState))}catch(e){}}
+// Manager report: a sidebar button that opens the same report as the Actions menu item (which is hidden)
+var mgrBtn=null;
+function mgrTool(){var t=null;document.querySelectorAll("#toolsPanel .tool-item").forEach(function(b){/Manager report/i.test(b.textContent)&&(t=b)});return t}
+function mgrNav(){
+  if(mgrBtn)return mgrBtn;var tool=mgrTool();if(!tool)return null;
+  tool.classList.add("vx-hidden");
+  mgrBtn=document.createElement("button");mgrBtn.type="button";mgrBtn.className="tab-btn";mgrBtn.title="Manager report";
+  mgrBtn.innerHTML='<i class="fas fa-id-card"></i><span class="nav-label">Manager Report</span>';
+  mgrBtn.addEventListener("click",function(){tool.click()});
+  return mgrBtn}
+function build(){
+  // rename Waste & Mix
+  var wm=tabBtn("wastemix");
+  if(wm){wm.title="Waste vs Food Sales";var l=wm.querySelector(".nav-label");l&&(l.textContent="Waste vs Food Sales")}
+  try{TAB_META.wastemix&&(TAB_META.wastemix.title="Waste vs Food Sales")}catch(e){}
+  var ov=tabBtn("overview");ov&&nav.prepend(ov);
+  GROUPS.forEach(function(g){
+    var items=(g.tabs||[]).map(tabBtn).concat(g.extra?g.extra():[]).filter(Boolean);
+    if(!items.length)return;
+    var box=document.createElement("div");box.className="nav-group";box.dataset.g=g.id;
+    box.innerHTML='<button type="button" class="nav-gh" aria-expanded="true"><i class="fas '+g.icon+' gi"></i><span class="nav-label">'+g.label+
+      '</span><span class="tab-badge gh-badge"></span><i class="fas fa-chevron-down chev"></i></button><div class="nav-gi"></div>';
+    var gi=box.querySelector(".nav-gi");items.forEach(function(b){gi.appendChild(b)});
+    nav.appendChild(box);g.box=box;
+    var closed=openState[g.id]===!1;box.classList.toggle("closed",closed);box.querySelector(".nav-gh").setAttribute("aria-expanded",String(!closed));
+    box.querySelector(".nav-gh").addEventListener("click",function(){var c=!box.classList.contains("closed");box.classList.toggle("closed",c);
+      this.setAttribute("aria-expanded",String(!c));openState[g.id]=!c;saveOpen()});
+  });
+  markActive();
+  // keep the group of the open page highlighted and expanded
+  new MutationObserver(markActive).observe(nav,{subtree:!0,attributes:!0,attributeFilter:["class"]});
+  // Smart Alerts count on the group header while it is closed
+  var sa=$("saBadge"),pg=GROUPS[3].box;
+  if(sa&&pg){var gb=pg.querySelector(".gh-badge"),sync=function(){var on=sa.style.display!=="none"&&sa.textContent.trim()!=="0";gb.textContent=sa.textContent;gb.classList.toggle("on",on)};
+    sync();new MutationObserver(sync).observe(sa,{attributes:!0,childList:!0,characterData:!0,subtree:!0})}
+}
+var marking=!1;
+function markActive(){if(marking)return;marking=!0;
+  GROUPS.forEach(function(g){if(!g.box)return;var a=!!g.box.querySelector(".tab-btn.active");
+    g.box.classList.contains("has-active")!==a&&g.box.classList.toggle("has-active",a);
+    if(a&&g.box.classList.contains("closed")){g.box.classList.remove("closed");g.box.querySelector(".nav-gh").setAttribute("aria-expanded","true")}});
+  marking=!1}
+
+/* ---------- 2. module access by role ---------- */
+var MODULES=[
+  {id:"sales",label:"Sales",sub:"Detailed, Format / AM, YoY, Leaderboard, Heatmap, Insights"},
+  {id:"wastage",label:"Wastage",sub:"Wastage, Waste vs Food Sales"},
+  {id:"productmix",label:"Product Mix",sub:"Menu Mix, and item changes in the store popup"},
+  {id:"projection",label:"Projection & Alerts",sub:"Target Pace, Pace vs Last Year, Smart Alerts, Manager Report"}];
+var ROLES=["admin","area","opmanager","store","viewer"],ROLE_NAME={admin:"Admin",area:"Area manager",opmanager:"Operation manager",store:"Store manager",viewer:"Viewer"};
+var ACCESS=null,setupMissing=!1;
+var role=function(){return String(window.__me&&window.__me.role||"").toLowerCase()};
+function allowed(m){var r=role();if(!r||r==="admin"||!ACCESS||!Array.isArray(ACCESS[m]))return!0;return ACCESS[m].indexOf(r)>=0}
+window.__moduleAllowed=allowed;
+function applyAccess(){
+  GROUPS.forEach(function(g){g.box&&g.box.classList.toggle("vx-hidden",!allowed(g.id))});
+  document.documentElement.classList.toggle("vx-no-mm",!allowed("productmix"));
+  // the page on screen belongs to a hidden module: go to Overview
+  var act=nav.querySelector(".tab-btn.active"),grp=act&&act.closest(".nav-group");
+  if(grp&&grp.classList.contains("vx-hidden")&&typeof switchTab==="function"){try{switchTab("overview")}catch(e){}}
+}
+// Menu Mix can't be opened (button, Alt+S) when Product Mix is hidden for this role
+document.addEventListener("click",function(e){
+  if(allowed("productmix"))return;var b=e.target.closest&&e.target.closest("#menuMixPill,.menu-mix-btn");
+  if(b){e.stopImmediatePropagation();e.preventDefault()}},!0);
+document.addEventListener("keydown",function(e){
+  if(!allowed("productmix")&&e.altKey&&!e.ctrlKey&&!e.metaKey&&(e.code==="KeyS"||e.key==="s"||e.key==="S")){e.stopImmediatePropagation();e.preventDefault()}},!0);
+async function loadAccess(){
+  var sb=window.__sb;if(!sb)return;
+  try{var r=await sb.from("site_settings").select("module_access").eq("id",1).maybeSingle();
+    if(r.error){setupMissing=/module_access/.test(r.error.message||"");ACCESS=null}
+    else{setupMissing=!1;ACCESS=r.data&&r.data.module_access&&typeof r.data.module_access==="object"?r.data.module_access:null}}
+  catch(e){ACCESS=null}
+  applyAccess();adminItem()}
+var started=!1;
+(function wait(){if(window.__loggedIn&&window.__sb&&window.__me){if(!started){started=!0;loadAccess();setInterval(loadAccess,6e5)}}else{started=!1;ACCESS=null;applyAccess()}setTimeout(wait,started?5e3:600)})();
+
+// admin: Actions > Module access
+var maItem=null;
+function adminItem(){
+  var isAdmin=role()==="admin";
+  if(!maItem){var users=$("usersBtn");if(!users)return;
+    maItem=document.createElement("button");maItem.className="tool-item";maItem.id="moduleAccessBtn";maItem.setAttribute("role","menuitem");
+    maItem.innerHTML='<i class="fas fa-user-shield"></i><span>Module access</span>';users.after(maItem);maItem.addEventListener("click",openMa)}
+  maItem.style.display=isAdmin?"":"none"}
+var ma=document.createElement("div");ma.className="modal-overlay";ma.id="maOverlay";
+ma.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" aria-label="Module access"><div class="dialog-body">'+
+  '<h3><i class="fas fa-user-shield"></i> Module access</h3><p>Choose which roles can see each part of the dashboard. Overview is always shown, and admins always see everything. '+
+  'This hides pages in the dashboard; the stores a person can see are still set in Manage users.</p>'+
+  '<table id="maTable"></table><div class="dialog-error" id="maErr"></div></div>'+
+  '<div class="dialog-actions"><button class="btn btn-outline" type="button" id="maCancel">Cancel</button><button class="btn btn-primary" type="button" id="maSave"><i class="fas fa-floppy-disk"></i> Save</button></div></div>';
+document.body.appendChild(ma);
+function closeMa(){ma.classList.remove("open")}
+$("maCancel").addEventListener("click",closeMa);ma.addEventListener("click",function(e){e.target===ma&&closeMa()});
+document.addEventListener("keydown",function(e){e.key==="Escape"&&ma.classList.contains("open")&&closeMa()});
+function openMa(){
+  var tp=$("toolsPanel");tp&&tp.classList.remove("open");
+  var on=function(m,r){return r==="admin"||!ACCESS||!Array.isArray(ACCESS[m])||ACCESS[m].indexOf(r)>=0};
+  $("maTable").innerHTML="<thead><tr><th>Module</th>"+ROLES.map(function(r){return"<th>"+ROLE_NAME[r]+"</th>"}).join("")+"</tr></thead><tbody>"+
+    MODULES.map(function(m){return'<tr><td><b>'+m.label+"</b><small>"+m.sub+"</small></td>"+ROLES.map(function(r){
+      return'<td><input type="checkbox" data-m="'+m.id+'" data-r="'+r+'"'+(on(m.id,r)?" checked":"")+(r==="admin"?' disabled title="Admins always see everything"':"")+"></td>"}).join("")+"</tr>"}).join("")+"</tbody>";
+  $("maErr").textContent=setupMissing?'One-time setup needed: run "Module access setup.sql" in Supabase (SQL Editor), then reopen this.':"";
+  ma.classList.add("open")}
+$("maSave").addEventListener("click",async function(){
+  var acc={};MODULES.forEach(function(m){acc[m.id]=["admin"]});
+  document.querySelectorAll("#maTable input[data-m]").forEach(function(c){c.checked&&c.dataset.r!=="admin"&&acc[c.dataset.m].push(c.dataset.r)});
+  var btn=this;btn.disabled=!0;$("maErr").textContent="";
+  try{var r=await window.__sb.rpc("admin_set_module_access",{p_access:acc});
+    if(r.error){$("maErr").textContent=/admin_set_module_access|function/.test(r.error.message)?'One-time setup needed: run "Module access setup.sql" in Supabase (SQL Editor). ('+r.error.message+")":"Could not save: "+r.error.message;return}
+    ACCESS=acc;setupMissing=!1;applyAccess();closeMa();
+    typeof showToast==="function"&&showToast("Module access saved. Others see the change the next time they open the dashboard.","success");
+  }catch(e){$("maErr").textContent="Could not save: "+(e.message||e)}finally{btn.disabled=!1}});
+
+/* ---------- 3. theme for the Menu Mix window ---------- */
+var VARS=["bg","surface","surface-hover","text-main","text-muted","text-light","border","border-strong","primary","primary-hover","primary-light",
+  "accent","success","success-light","danger","danger-light","warning","warning-light","shadow","bg-glass"];
+function themeMsg(){var cs=getComputedStyle(document.documentElement),v={};VARS.forEach(function(k){v[k]=cs.getPropertyValue("--"+k).trim()});
+  return{type:"viewx-theme",dark:document.documentElement.getAttribute("data-theme")==="dark",palette:document.documentElement.getAttribute("data-palette")||"",
+    vars:v,font:getComputedStyle(document.body).fontFamily}}
+function sendTheme(){var f=$("menuMixFrame");if(!f||!f.contentWindow||!f.getAttribute("src"))return;try{f.contentWindow.postMessage(themeMsg(),MM_ORIGIN)}catch(e){}}
+var mf=$("menuMixFrame");
+if(mf){mf.addEventListener("load",function(){sendTheme();setTimeout(sendTheme,1500)});
+  window.addEventListener("message",function(e){e.origin===MM_ORIGIN&&e.source===mf.contentWindow&&e.data&&e.data.type==="viewx-need-theme"&&sendTheme()})}
+new MutationObserver(function(){setTimeout(sendTheme,30)}).observe(document.documentElement,{attributes:!0,attributeFilter:["data-theme","data-palette"]});
+
+document.readyState==="loading"?document.addEventListener("DOMContentLoaded",function(){setTimeout(build,0)}):build();
 }();</script>
 
 </body>

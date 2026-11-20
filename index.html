@@ -2850,8 +2850,9 @@ new MutationObserver(function(){sec.classList.contains("active")&&refresh()}).ob
 }();</script>
 
 <!-- =====================================================================
-     ADD-ON v8.1 (new code only): navigation groups, module access by role, Menu Mix theme
+     ADD-ON v8.2 (new code only): navigation groups, module access by role, Menu Mix theme
      1. Sidebar in collapsible groups: Overview, Sales, Wastage, Product Mix, Projection & Alerts.
+        Every group starts closed and opens when clicked (v8.2).
         Manager report moves from the Actions menu into Projection & Alerts. The Menu Mix button
         in the top bar is removed (Menu Mix is under Product Mix; Alt+S still works).
      2. Module access: admins choose which roles see Sales, Wastage, Product Mix and
@@ -2905,8 +2906,7 @@ var GROUPS=[
   {id:"productmix",label:"Product Mix",icon:"fa-utensils",extra:function(){return[nav.querySelector(".menu-mix-btn")]}},
   {id:"projection",label:"Projection & Alerts",icon:"fa-bullseye",tabs:["pace","lypace","alerts"],extra:function(){return[mgrNav()]}}
 ];
-var OPEN_KEY="vx-nav-open",openState={};try{openState=JSON.parse(localStorage.getItem(OPEN_KEY)||"{}")||{}}catch(e){}
-function saveOpen(){try{localStorage.setItem(OPEN_KEY,JSON.stringify(openState))}catch(e){}}
+try{localStorage.removeItem("vx-nav-open")}catch(e){}
 // Manager report: a sidebar button that opens the same report as the Actions menu item (which is hidden)
 var mgrBtn=null;
 function mgrTool(){var t=null;document.querySelectorAll("#toolsPanel .tool-item").forEach(function(b){/Manager report/i.test(b.textContent)&&(t=b)});return t}
@@ -2931,9 +2931,9 @@ function build(){
       '</span><span class="tab-badge gh-badge"></span><i class="fas fa-chevron-down chev"></i></button><div class="nav-gi"></div>';
     var gi=box.querySelector(".nav-gi");items.forEach(function(b){gi.appendChild(b)});
     nav.appendChild(box);g.box=box;
-    var closed=openState[g.id]===!1;box.classList.toggle("closed",closed);box.querySelector(".nav-gh").setAttribute("aria-expanded",String(!closed));
+    box.classList.add("closed");box.querySelector(".nav-gh").setAttribute("aria-expanded","false");   // every group starts closed
     box.querySelector(".nav-gh").addEventListener("click",function(){var c=!box.classList.contains("closed");box.classList.toggle("closed",c);
-      this.setAttribute("aria-expanded",String(!c));openState[g.id]=!c;saveOpen()});
+      this.setAttribute("aria-expanded",String(!c))});
   });
   markActive();
   // keep the group of the open page highlighted and expanded

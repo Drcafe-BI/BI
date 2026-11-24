@@ -4668,7 +4668,8 @@ var ov=document.createElement("div");ov.className="modal-overlay";ov.id="alOverl
 ov.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" aria-label="Store allocation"><div class="dialog-body">'+
   '<h3><i class="fas fa-sitemap"></i> Store allocation</h3>'+
   '<p class="al-note">One list for <b>Sales, Wastage and Menu Mix</b>: each store\'s name, Category, Segment, Area manager and Warehouse. '+
-  'Uploads take these from here, so the sales and wastage files do not need them. Saving a new list updates <b>all months</b> to it.</p>'+
+  'Uploads take these from here, so the sales and wastage files do not need them. Saving a new list updates <b>all months</b> to it. '+
+  '<b>Active = No</b> means the store is closed: any sales, wastage or Menu Mix rows for it in new uploads are ignored.</p>'+
   '<div class="al-mgrs" id="alMgrs"></div><div id="alWarn"></div>'+
   '<div class="al-bar"><input type="search" id="alSearch" placeholder="Search code, name, manager…" autocomplete="off">'+
   '<span class="al-xp"></span><button type="button" class="btn btn-outline" id="alUploadBtn"><i class="fas fa-upload"></i> Upload allocation file</button>'+
@@ -4704,7 +4705,7 @@ function render(){
   if(!d)rows.sort(function(a,b){return num(a.s.store_code,b.s.store_code)});
   $("alList").innerHTML=rows.length?'<table><thead><tr>'+COLS.map(function(c){return"<th>"+c[1]+"</th>"}).join("")+(d?"<th>Change</th>":"")+"</tr></thead><tbody>"+
     rows.map(function(x){var s=x.s;return'<tr class="'+x.t+'">'+COLS.map(function(c){var v=s[c[0]];
-      if(c[0]==="active")return'<td><span class="al-pill '+(v===false?"off":"on")+'">'+(v===false?"No":"Yes")+"</span></td>";
+      if(c[0]==="active")return'<td><span class="al-pill '+(v===false?"off":"on")+'">'+(v===false?"No · closed":"Yes")+"</span></td>";
       var was=x.t==="chg"&&x.ch.some(function(z){return z[0]===c[0]})?'<div class="was">was: '+esc(x.o[c[0]]||"—")+"</div>":"";
       return"<td>"+esc(v==null||v===""?"—":v)+was+"</td>"}).join("")+
       (d?"<td>"+(x.t==="new"?"New store":x.t==="del"?"Removed":x.t==="chg"?"Changed":"")+"</td>":"")+"</tr>"}).join("")+"</tbody></table>"

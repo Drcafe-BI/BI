@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
+  <!-- v10.10: anti-framing. The page stays hidden if another website shows it inside a frame (clickjacking). -->
+  <style id="antiFrame">html{display:none!important}</style>
+  <script>(function(){var ok=false;try{ok=window.top===window.self||window.top.location.origin===window.location.origin}catch(e){}if(ok){var s=document.getElementById('antiFrame');if(s)s.parentNode.removeChild(s)}else{try{window.top.location=window.self.location.href}catch(e){}}})();</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sales Intelligence Dashboard</title>

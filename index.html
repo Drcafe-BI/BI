@@ -4669,7 +4669,8 @@ ov.innerHTML='<div class="modal-box dialog-box" role="dialog" aria-modal="true" 
   '<h3><i class="fas fa-sitemap"></i> Store allocation</h3>'+
   '<p class="al-note">One list for <b>Sales, Wastage and Menu Mix</b>: each store\'s name, Category, Segment, Area manager and Warehouse. '+
   'Uploads take these from here, so the sales and wastage files do not need them. Saving a new list updates <b>all months</b> to it. '+
-  '<b>Active = No</b> means the store is closed: any sales, wastage or Menu Mix rows for it in new uploads are ignored.</p>'+
+  '<b>Only the stores in this list (Active = Yes) are saved from uploads</b>: sales, wastage and Menu Mix rows of any other store are ignored. '+
+  'Add a new store here <b>before</b> uploading its data. To close a store, take it out of the list (or set Active = No).</p>'+
   '<div class="al-mgrs" id="alMgrs"></div><div id="alWarn"></div>'+
   '<div class="al-bar"><input type="search" id="alSearch" placeholder="Search code, name, manager…" autocomplete="off">'+
   '<span class="al-xp"></span><button type="button" class="btn btn-outline" id="alUploadBtn"><i class="fas fa-upload"></i> Upload allocation file</button>'+
@@ -4699,7 +4700,7 @@ function render(){
   $("alMgrs").innerHTML=Object.keys(mg).sort().map(function(k){return"<span>"+esc(k)+" · "+mg[k]+"</span>"}).join("");
   var have=new Set(list.map(function(s){return s.store_code})),ds=dataStores(),miss=[];ds.forEach(function(n,c){have.has(c)||miss.push(c+" "+n)});
   $("alWarn").innerHTML=(setupMissing?'<div class="al-warn">One-time setup needed: run "5 One store allocation (run in SALES project).sql" in the Sales project, then reopen this.</div>':"")+
-    (miss.length?'<div class="al-warn"><b>'+miss.length+" store"+(miss.length===1?" with sales is":"s with sales are")+" not in "+(NEXT?"the uploaded file":"the allocation")+":</b> "+esc(miss.join(", "))+". "+(miss.length===1?"It keeps":"They keep")+" the manager from its own files until added.</div>":"");
+    (miss.length?'<div class="al-warn"><b>'+miss.length+" store"+(miss.length===1?" with sales is":"s with sales are")+" not in "+(NEXT?"the uploaded file":"the allocation")+":</b> "+esc(miss.join(", "))+". "+(miss.length===1?"Its":"Their")+" new uploads will not be saved until "+(miss.length===1?"it is":"they are")+" added.</div>":"");
   var rows=d?d.filter(function(x){return x.t}).concat(d.filter(function(x){return!x.t})):list.map(function(s){return{s:s,t:""}});
   rows=rows.filter(function(x){var s=x.s;return!q||[s.store_code,s.store_name,s.area_manager,s.segment,s.format,s.warehouse].join(" ").toLowerCase().includes(q)});
   if(!d)rows.sort(function(a,b){return num(a.s.store_code,b.s.store_code)});
@@ -4756,7 +4757,7 @@ $("alFile").addEventListener("change",async function(){var f=this.files&&this.fi
 // save, then bring every month in line with it
 $("alSave").addEventListener("click",async function(){
   if(!NEXT)return;var d=diff(),del=d.filter(function(x){return x.t==="del"}).length;
-  if(typeof uiDialog==="function"&&!await uiDialog({title:"Save the new allocation?",message:NEXT.length+" stores."+(del?" "+del+" store(s) not in the file will be removed from the allocation.":"")+
+  if(typeof uiDialog==="function"&&!await uiDialog({title:"Save the new allocation?",message:NEXT.length+" stores."+(del?" "+del+" store(s) not in the file will be removed from the allocation, and their future uploads will be ignored.":"")+
     " All months of sales, wastage and Menu Mix will follow it. This takes a little while.",confirmText:"Save and apply"}))return;
   var btn=this,sb=window.__sb;btn.disabled=!0;$("alErr").textContent="";
   try{
@@ -4776,6 +4777,21 @@ $("alSave").addEventListener("click",async function(){
     $("alErr").textContent=/admin_set_allocation|admin_apply_allocation|function/i.test(e.message||"")&&/not find|does not exist|schema cache/i.test(e.message||"")?
       'One-time setup needed: run "5 One store allocation (run in SALES project).sql" in the Sales project.':"Could not save: "+(e.message||e)+(done?" ("+done+" months were updated; save again to finish)":"")}
   finally{btn.disabled=!1}});
+
+/* ---------- 3. v10.8: before "Sync to database?", list stores that will be skipped ---------- */
+var skipped=function(){
+  if(!window.__storeAlloc||!window.__storeAlloc.size)return"";
+  var ok=function(c){var a=window.__storeAlloc.get(key(c));return a&&a.active!==!1};
+  var m=new Map;
+  [[window.__rawData,"store"],[window.__wastageData,"storeName"]].forEach(function(p){(p[0]||[]).forEach(function(r){var c=key(r.storeCode);if(!c||ok(c))return;
+    var x=m.get(c);x||m.set(c,x={n:0,name:r[p[1]]||r.warehouse||""});x.n++})});
+  if(!m.size)return"";
+  var list=[...m.entries()].sort(function(a,b){return b[1].n-a[1].n}).slice(0,12).map(function(e){var nm=String(e[1].name||"");return(nm&&nm.indexOf(e[0])===0?nm:e[0]+(nm&&nm!==e[0]?" "+nm:""))+" ("+e[1].n+" row"+(e[1].n===1?"":"s")+")"});
+  return" ⚠ Not in Store allocation, so these rows will NOT be saved: "+list.join(", ")+(m.size>12?" and "+(m.size-12)+" more":"")+". Add the store in Actions > Store allocation first if it is new."};
+(function hook(){
+  if(typeof window.uiDialog!=="function"){setTimeout(hook,500);return}if(window.uiDialog.__al)return;
+  var o=window.uiDialog,f=function(opts){try{if(opts&&/^Sync to database\?$/.test(opts.title||"")){var w=skipped();w&&(opts=Object.assign({},opts,{message:(opts.message||"")+w}))}}catch(e){}return o.apply(this,arguments.length?[opts].concat([].slice.call(arguments,1)):arguments)};
+  f.__al=1;window.uiDialog=f;try{uiDialog=f}catch(e){}})();
 
 function open(){
   var tp=$("toolsPanel");tp&&tp.classList.remove("open");if(!isAdmin())return;

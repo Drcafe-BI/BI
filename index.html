@@ -1214,8 +1214,18 @@ async function loadRef(c){
   if(!ref.category)throw Error('the Category mapping is not in the database yet'+(ME.role==='admin'?' (put Category.xlsx in the bucket)':' — ask the admin'));
   if(!ref.allocation)throw Error(ME.all?'the Store allocation is not in the database yet':'none of your stores are in the Store allocation — ask the admin');
 }
+/* v10.3: the Sales project also serves the Sales dashboard, so right after sign-in the database can be busy and a month
+   can hit its time limit. Such a month is asked for again (up to 3 more times, waiting a little longer each time). */
+const busyErr=e=>/statement timeout|canceling statement|57014|timed? ?out|Failed to fetch|NetworkError|Load failed|50[234]/i.test(errText(e)+' '+(e&&e.code||''));
 async function fetchMonthRecs(c,ym){
-  const {data,error}=await c.rpc('mm_sales_month',{p_ym:ym});if(error)throw Error(`${ym}: ${error.message}`);
+  let data,error;
+  for(let tries=0;;tries++){
+    ({data,error}=await c.rpc('mm_sales_month',{p_ym:ym}));
+    if(!error||tries>=3||!busyErr(error))break;
+    console.warn(`Menu Mix: ${ym} took too long (database busy), trying again`);
+    await tick(2500*(tries+1)+Math.random()*1000);
+  }
+  if(error)throw Error(`${ym}: ${error.message}`);
   const S=data.stores||{},I=data.items||{},rows=data.rows||[],out=new Array(rows.length);
   for(let i=0;i<rows.length;i++){const [d,sid,it,q,a]=rows[i],nm=I[it]||'';
     out[i]={item:String(it),storeId:String(sid),storeName:S[sid]||'',date:`${ym}-${String(d).padStart(2,'0')}`,qty:+q||0,sales:+a||0,name:nm,long:nm}}
@@ -1223,7 +1233,7 @@ async function fetchMonthRecs(c,ym){
 }
 async function fetchMonths(c,list,onDone){
   const recs=[];let next=0,done=0;
-  await Promise.all([0,1,2].map(async()=>{while(next<list.length){const r=await fetchMonthRecs(c,list[next++]);for(let i=0;i<r.length;i++)recs.push(r[i]);done++;if(onDone)onDone(done)}}));
+  await Promise.all([0,1].map(async()=>{while(next<list.length){const r=await fetchMonthRecs(c,list[next++]); // v10.3: two at a time (was three), lighter on the shared databasefor(let i=0;i<r.length;i++)recs.push(r[i]);done++;if(onDone)onDone(done)}}));
   return recs;
 }
 function saveRowCache(){

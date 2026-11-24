@@ -784,24 +784,39 @@ const SHARED=window.self!==window.top;                                     // op
 const PARENT_ORIGINS=['https://drcafe-bi.com','https://www.drcafe-bi.com',location.origin]; // where the Sales dashboard is hosted
 let parentToken='',tokenWaiters=[];
 const tokenExp=t=>{try{const p=t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');return JSON.parse(atob(p+'='.repeat((4-p.length%4)%4))).exp*1000}catch(e){return 0}};
+/* v10.4: Menu Mix is part of the Sales dashboard, so it never asks anyone to sign in. It takes the dashboard's
+   sign-in; while the dashboard is still signing in (6-digit code and so on) it keeps asking quietly, and as soon as
+   the sign-in is there it carries on by itself. */
+const askParent=()=>PARENT_ORIGINS.forEach(o=>{try{window.parent.postMessage({type:'viewx-need-session'},o)}catch(e){}});
 function salesTokenFromParent(){
   if(parentToken&&tokenExp(parentToken)-Date.now()>60000)return Promise.resolve(parentToken);
   return new Promise((resolve,reject)=>{
-    const t=setTimeout(()=>reject(Error('no sign-in from the Sales dashboard — sign in there and reopen Menu Mix')),10000);
-    tokenWaiters.push(tok=>{clearTimeout(t);resolve(tok)});
-    PARENT_ORIGINS.forEach(o=>window.parent.postMessage({type:'viewx-need-session'},o));
+    const ask=setInterval(askParent,2000),t=setTimeout(()=>{clearInterval(ask);reject(Error('Menu Mix could not get your dashboard sign-in. Reload the page.'))},120000);
+    tokenWaiters.push(tok=>{clearTimeout(t);clearInterval(ask);resolve(tok)});
+    askParent();
   });
+}
+let waitSignIn=null; // set while the dashboard is signed out: Menu Mix keeps asking and opens again once signed in
+function waitForDashboardSignIn(){
+  if(waitSignIn)return;
+  setNavState('loading','Waiting for the dashboard sign-in…');setSrcStatus('Menu Mix opens as soon as you are signed in to the dashboard.');
+  waitSignIn=setInterval(askParent,4000);
 }
 window.addEventListener('message',e=>{
   if(!SHARED||e.source!==window.parent||!PARENT_ORIGINS.includes(e.origin))return;
   const d=e.data||{};
-  if(d.type==='viewx-session'&&typeof d.access_token==='string'){parentToken=d.access_token;tokenWaiters.splice(0).forEach(f=>f(parentToken))}
+  if(d.type==='viewx-session'&&typeof d.access_token==='string'){
+    parentToken=d.access_token;tokenWaiters.splice(0).forEach(f=>f(parentToken));
+    if(waitSignIn){clearInterval(waitSignIn);waitSignIn=null;if(!ME&&!authLoading)startAuthed()}
+  }
   else if(d.type==='viewx-signout'){
-    parentToken='';ME=null;rawRows=[];deleteFromDB(CACHE_KEY);forgetSso();
-    try{sb().auth.signOut({scope:'local'}).catch(()=>{})}catch(err){}
-    $('dashboard').classList.add('hidden');$('userBox').classList.add('hidden');showView('upload');
-    setNavState('error','Signed out in the Sales dashboard');
-    setSrcStatus('Signed out. Sign in to the Sales dashboard to see Menu Mix.',true);
+    if(tokenWaiters.length)return; // still signing in: the dashboard answers again once it is done
+    if(!waitSignIn){
+      parentToken='';ME=null;rawRows=[];deleteFromDB(CACHE_KEY);forgetSso();
+      try{sb().auth.signOut({scope:'local'}).catch(()=>{})}catch(err){}
+      $('dashboard').classList.add('hidden');$('userBox').classList.add('hidden');showView('upload');
+    }
+    waitForDashboardSignIn();
   }
 });
 /* v9.1 STORES NOT OPERATIONAL: stores the Sales dashboard admin marked "Not operational" (Actions > Store status)
@@ -1233,7 +1248,7 @@ async function fetchMonthRecs(c,ym){
 }
 async function fetchMonths(c,list,onDone){
   const recs=[];let next=0,done=0;
-  await Promise.all([0,1].map(async()=>{while(next<list.length){const r=await fetchMonthRecs(c,list[next++]); // v10.3: two at a time (was three), lighter on the shared databasefor(let i=0;i<r.length;i++)recs.push(r[i]);done++;if(onDone)onDone(done)}}));
+  await Promise.all([0,1].map(async()=>{while(next<list.length){const r=await fetchMonthRecs(c,list[next++]);/* v10.3: two at a time (was three), lighter on the shared database */for(let i=0;i<r.length;i++)recs.push(r[i]);done++;if(onDone)onDone(done)}}));
   return recs;
 }
 function saveRowCache(){
@@ -1315,10 +1330,10 @@ async function startAuthed(){
   const status=(state,text,warn)=>{setNavState(state,text);setSrcStatus(text,warn);setMessage(text,warn)};
   let parsed=null,syncProblem='',fromCache=false,verified=false,laterSwap='';
   try{
-    status('loading','Signing in…');
+    status('loading',SHARED?'Opening Menu Mix…':'Signing in…');
     const cacheP=getFromDB(CACHE_KEY).catch(()=>null);
     if(SHARED){
-      status('loading','Signing in with the Sales dashboard…');const tok=await salesTokenFromParent();
+      const tok=await salesTokenFromParent();
       fromCache=showCachedFor(tokenEmail(tok),await cacheP);
       if(fromCache)status('loading','Checking for new data…');
       const reuse=await reuseMenuMixSession(tok);
@@ -1343,8 +1358,11 @@ async function startAuthed(){
     const m=errText(e);console.error(e);
     if(fromCache&&!verified){ // the last loaded copy was on screen but the sign-in did not go through: take it off
       ME=null;rawRows=[];menuSig='';$('dashboard').classList.add('hidden');$('userBox').classList.add('hidden');showView('upload')}
+    if(SHARED&&!ME&&/dashboard sign-in/i.test(m)){waitForDashboardSignIn();return} // v10.4: not signed in to the dashboard yet: wait for it
     if(/JWT|session|sign in|Sales dashboard|no active access|6-digit/i.test(m)&&!ME){
-      if(SHARED){status('error',m,true);showView('upload');return}
+      if(SHARED){ // inside the dashboard: get a fresh dashboard sign-in once and try again, never ask to sign in here
+        if(!startAuthed.retried){startAuthed.retried=true;parentToken='';authLoading=false;setTimeout(startAuthed,1500);return}
+        status('error','Menu Mix could not open: '+m,true);showView('upload');return}
       showLogin('Sign in with your Sales dashboard email and password.');return}
     if(rawRows.length)status('error','Showing the last loaded data — '+m,true);
     else{status('error','Could not load: '+m,true);showView('upload')}
